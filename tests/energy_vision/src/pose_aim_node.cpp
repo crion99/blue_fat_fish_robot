@@ -37,7 +37,7 @@ public:
     declare_parameter("t_muzzle_x", 0.10);  // 枪口沿枪管方向的偏移（m）
     declare_parameter("fire_mode", 1);      // 1=只跟瞄 2=跟瞄并开火
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
-    declare_parameter("stale_timeout_s", 0.20);  // 超过该时长无目标则发 mode=0
+    declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
 
     t_cam_x_ = get_parameter("t_cam_x").as_double();
     t_muzzle_x_ = get_parameter("t_muzzle_x").as_double();
@@ -79,7 +79,11 @@ private:
 
     if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(cz) || cz <= 0.05) return;
 
-    last_pose_time_ = rclcpp::Time(msg.header.stamp);
+    // 用“收到消息的时刻”记时间戳，而不是消息里的 header.stamp。
+    // 关键：msg.header.stamp 是仿真时间，而 get_clock()->now() 在没开 use_sim_time 时是墙钟时间，
+    // 两者相减会差 ~1.7e9 秒，导致“目标丢失”误报。统一用 get_clock()->now() 后，
+    // 无论是否开 use_sim_time 都在同一个时间域，判停逻辑才是对的。
+    last_pose_time_ = get_clock()->now();
 
     // 相机系 -> 云台系
     const double gx = cz + t_cam_x_;
@@ -141,7 +145,7 @@ private:
   double t_muzzle_x_{0.10};
   int fire_mode_{1};
   double latency_s_{0.03};
-  double stale_timeout_s_{0.20};
+  double stale_timeout_s_{0.40};
 
   double yaw_{0.0};
   double pitch_{0.0};
