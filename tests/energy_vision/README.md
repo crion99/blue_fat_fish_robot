@@ -49,7 +49,9 @@ ros2 run energy_vision pose_aim_node
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `t_cam_x` / `t_muzzle_x` | 0.00 / 0.10 | 相机、枪口沿枪管方向的安装偏移（m） |
-| `fire_mode` | 1 | 1=只跟瞄；2=跟瞄并开火 |
+| `fire_mode` | 2 | 0=只跟；1=跟踪即开火；2=锁定后开火（默认推荐） |
+| `fire_align_deg` | 1.0 | 锁定开火：靶心与光轴夹角低于此值才射（度） |
+| `fire_settle_degps` | 2.0 | 锁定开火：云台角速度低于此值才射（度/秒） |
 | `latency_s` | 0.03 | 图像→出弹总延迟，用于旋转靶提前量 |
 | `stale_timeout_s` | 0.40 | 目标丢失超过该时长后发 `mode=0` 停控 |
 | `dead_reckon_s` | 0.50 | 丢失后按角速度航位推算、保持扫动的时长 |
@@ -68,7 +70,19 @@ ros2 run energy_vision pose_aim_node
   ros2 topic echo /rune/state --field targets   # 真值，仅调试对照，不要进提交逻辑
   ```
 
-## 与第四部分的衔接
+## 第四部分（击打各阶段）
+
+开火不需要额外代码：`pose_aim_node` 默认 `fire_mode=2`（锁定后开火），对准且云台停稳时自动发
+`mode=2`，仿真 `launcher_node` 按 3 发/s 节流发射并自己判定命中。
+
+- 看命中：`ros2 topic echo /rune/hit`（`valid=true` 且 `score>0` 才算有效命中）；
+- 看总分：`ros2 topic echo /score`（`total`、`mode_hits[0..3]`、`penalty`、`balls_fired`）；
+- 分值（人工/自主）：fixed 15/30、random_fixed 20/40、small 25/50、big 30/60；
+- **注意罚分**：`/score` 的 `penalty` 是“超发”扣分（每超 1 球 +20），所以务必用 `fire_mode=2`
+  锁定开火，别边扫边射浪费弹药。
+
+打各阶段的建议顺序：`fixed`（调稳对准）→ `small`（慢转，调 `dead_reckon_s`/`smooth_alpha`）
+→ `random_fixed` → `big`（快转，调 `latency_s` 提前量）。
 
 `/rune/state` 里 `stage`（0=FIXED 1=RANDOM_FIXED 2=SMALL 3=BIG）与 `speed`（机关角速度）
 给旋转靶提前量提供了真值；但正式考核中第 1、3 部分必须从图像自己解，`/rune/state` 只用于调试对照，

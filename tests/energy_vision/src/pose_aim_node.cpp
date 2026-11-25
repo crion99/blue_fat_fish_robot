@@ -44,7 +44,9 @@ public:
   {
     declare_parameter("t_cam_x", 0.00);     // 相机相对云台旋转中心的沿枪管偏移（m）
     declare_parameter("t_muzzle_x", 0.10);  // 枪口沿枪管方向的偏移（m）
-    declare_parameter("fire_mode", 1);      // 1=只跟瞄 2=跟瞄并开火
+    declare_parameter("fire_mode", 2);      // 0=只跟 1=跟踪即开火 2=锁定后开火（默认）
+    declare_parameter("fire_align_deg", 1.0);     // 锁定开火：靶心与光轴夹角低于此值（度）
+    declare_parameter("fire_settle_degps", 2.0);  // 锁定开火：云台角速度低于此值（度/秒）
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
@@ -54,6 +56,8 @@ public:
     t_cam_x_ = get_parameter("t_cam_x").as_double();
     t_muzzle_x_ = get_parameter("t_muzzle_x").as_double();
     fire_mode_ = get_parameter("fire_mode").as_int();
+    fire_align_deg_ = get_parameter("fire_align_deg").as_double();
+    fire_settle_degps_ = get_parameter("fire_settle_degps").as_double();
     latency_s_ = get_parameter("latency_s").as_double();
     stale_timeout_s_ = get_parameter("stale_timeout_s").as_double();
     dead_reckon_s_ = get_parameter("dead_reckon_s").as_double();
@@ -83,6 +87,7 @@ private:
     yaw_ = msg.yaw;
     pitch_ = msg.pitch;
     yaw_rate_ = msg.yaw_vel;
+    pitch_rate_ = msg.pitch_vel;
     bullet_speed_ = msg.bullet_speed > 1.0 ? msg.bullet_speed : 12.0;
   }
 
@@ -144,7 +149,16 @@ private:
     last_cmd_pitch_ = pitch_cmd;
 
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
-    cmd.mode = static_cast<uint8_t>(fire_mode_);
+    uint8_t fire_cmd = static_cast<uint8_t>(std::clamp(fire_mode_, 0, 2));
+    if (fire_cmd == 2) {
+      // 锁定才开火：对准 + 云台基本停稳，避免边扫边射浪费弹药/吃超发罚分
+      const double align = fire_align_deg_ * M_PI / 180.0;
+      const double settle = fire_settle_degps_ * M_PI / 180.0;
+      const bool locked = std::fabs(rel_yaw) < align && std::fabs(rel_pitch) < align &&
+                          std::fabs(yaw_rate_) < settle && std::fabs(pitch_rate_) < settle;
+      if (!locked) fire_cmd = 1;
+    }
+    cmd.mode = fire_cmd;
     cmd.yaw = yaw_cmd;
     cmd.pitch = pitch_cmd;
     cmd.yaw_vel = 0.0;   // 只做位置跟踪，速度前馈交给仿真/下位机自己的控制器，避免二次叠加
@@ -198,7 +212,9 @@ private:
 
   double t_cam_x_{0.0};
   double t_muzzle_x_{0.10};
-  int fire_mode_{1};
+  int fire_mode_{2};
+  double fire_align_deg_{1.0};
+  double fire_settle_degps_{2.0};
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};
@@ -213,6 +229,7 @@ private:
   double yaw_{0.0};
   double pitch_{0.0};
   double yaw_rate_{0.0};
+  double pitch_rate_{0.0};
   double bullet_speed_{12.0};
 
   rclcpp::Time last_pose_time_;
