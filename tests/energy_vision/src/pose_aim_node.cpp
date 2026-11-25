@@ -16,6 +16,7 @@
 //       pitch = atan2(d_z, hypot(d_x, d_y))
 //   目标绝对角 = 当前云台角 + 上述相对角，再叠加旋转靶提前量 yaw_rate·(latency + d/v)。
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -27,6 +28,14 @@
 
 namespace energy_vision
 {
+namespace {
+double wrapAngle(double a)
+{
+  a = std::fmod(a + M_PI, 2.0 * M_PI);
+  if (a < 0.0) a += 2.0 * M_PI;
+  return a - M_PI;
+}
+}  // namespace
 
 class PoseAimNode : public rclcpp::Node
 {
@@ -38,12 +47,16 @@ public:
     declare_parameter("fire_mode", 1);      // 1=只跟瞄 2=跟瞄并开火
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
+    declare_parameter("smooth_alpha", 0.4);      // 指令低通系数，越小越“钝”越不易过冲
+    declare_parameter("max_cmd_rate_radps", 3.0);  // 单帧限速，防止猛摆冲出视野
 
     t_cam_x_ = get_parameter("t_cam_x").as_double();
     t_muzzle_x_ = get_parameter("t_muzzle_x").as_double();
     fire_mode_ = get_parameter("fire_mode").as_int();
     latency_s_ = get_parameter("latency_s").as_double();
     stale_timeout_s_ = get_parameter("stale_timeout_s").as_double();
+    smooth_alpha_ = get_parameter("smooth_alpha").as_double();
+    max_cmd_rate_radps_ = get_parameter("max_cmd_rate_radps").as_double();
 
     pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/vision/pending_target_pose", rclcpp::SensorDataQoS(),
@@ -99,18 +112,40 @@ private:
     const double rel_yaw = std::atan2(dy, dx);
     const double rel_pitch = std::atan2(dz, std::hypot(dx, dy));
 
-    double yaw_cmd = yaw_ + rel_yaw;
-    double pitch_cmd = pitch_ + rel_pitch;
+    double raw_yaw = yaw_ + rel_yaw;
+    double raw_pitch = pitch_ + rel_pitch;
 
-    // 旋转靶提前量
+    // 旋转靶提前量（先加在原始目标上，再一起平滑）
     const double flight = distance / bullet_speed_;
-    yaw_cmd += yaw_rate_ * (latency_s_ + flight);
+    raw_yaw += yaw_rate_ * (latency_s_ + flight);
+
+    // 低通平滑：抑制像素噪声 + 反馈延迟引起的抖振/过冲
+    if (!has_cmd_) {
+      smoothed_yaw_ = raw_yaw;
+      smoothed_pitch_ = raw_pitch;
+      has_cmd_ = true;
+    } else {
+      smoothed_yaw_ += smooth_alpha_ * wrapAngle(raw_yaw - smoothed_yaw_);
+      smoothed_pitch_ += smooth_alpha_ * (raw_pitch - smoothed_pitch_);
+    }
+
+    // 限速：单帧允许的最大角度变化，防止一帧猛摆几十度把目标甩出视野
+    const double dt = 1.0 / 60.0;
+    const double max_step = max_cmd_rate_radps_ * dt;
+    double d_yaw = wrapAngle(smoothed_yaw_ - last_cmd_yaw_);
+    double d_pitch = smoothed_pitch_ - last_cmd_pitch_;
+    d_yaw = std::clamp(d_yaw, -max_step, max_step);
+    d_pitch = std::clamp(d_pitch, -max_step, max_step);
+    const double yaw_cmd = last_cmd_yaw_ + d_yaw;
+    const double pitch_cmd = last_cmd_pitch_ + d_pitch;
+    last_cmd_yaw_ = yaw_cmd;
+    last_cmd_pitch_ = pitch_cmd;
 
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
     cmd.mode = static_cast<uint8_t>(fire_mode_);
     cmd.yaw = yaw_cmd;
     cmd.pitch = pitch_cmd;
-    cmd.yaw_vel = yaw_rate_;
+    cmd.yaw_vel = 0.0;   // 只做位置跟踪，速度前馈交给仿真/下位机自己的控制器，避免二次叠加
     cmd.yaw_acc = 0.0;
     cmd.pitch_vel = 0.0;
     cmd.pitch_acc = 0.0;
@@ -136,6 +171,9 @@ private:
     cmd.yaw_acc = 0.0;
     cmd.pitch_vel = 0.0;
     cmd.pitch_acc = 0.0;
+    has_cmd_ = false;          // 目标丢失后重置平滑/限速状态，重新捕获时从当前姿态起步
+    last_cmd_yaw_ = yaw_;
+    last_cmd_pitch_ = pitch_;
     cmd_pub_->publish(cmd);
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "目标丢失 %.1f s，发送 mode=0",
                          (now - last_pose_time_).seconds());
@@ -146,6 +184,13 @@ private:
   int fire_mode_{1};
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
+  double smooth_alpha_{0.4};
+  double max_cmd_rate_radps_{3.0};
+  bool has_cmd_{false};
+  double smoothed_yaw_{0.0};
+  double smoothed_pitch_{0.0};
+  double last_cmd_yaw_{0.0};
+  double last_cmd_pitch_{0.0};
 
   double yaw_{0.0};
   double pitch_{0.0};

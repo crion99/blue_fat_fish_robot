@@ -51,7 +51,9 @@ ros2 run energy_vision pose_aim_node
 | `t_cam_x` / `t_muzzle_x` | 0.00 / 0.10 | 相机、枪口沿枪管方向的安装偏移（m） |
 | `fire_mode` | 1 | 1=只跟瞄；2=跟瞄并开火 |
 | `latency_s` | 0.03 | 图像→出弹总延迟，用于旋转靶提前量 |
-| `stale_timeout_s` | 0.20 | 目标丢失超过该时长后发 `mode=0` 停控 |
+| `stale_timeout_s` | 0.40 | 目标丢失超过该时长后发 `mode=0` 停控 |
+| `smooth_alpha` | 0.4 | 指令低通系数（0~1），越小越“钝”、越不易过冲 |
+| `max_cmd_rate_radps` | 3.0 | 指令限速（rad/s），过大容易把目标甩出视野 |
 
 ## 第一、二部分验证
 
