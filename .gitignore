@@ -133,3 +133,6 @@ media/**/*.part
 *.pfx
 secrets.*
 credentials*
+
+# 第三方仿真平台（单独 clone，不入库）
+algorithm/robomini_sim/

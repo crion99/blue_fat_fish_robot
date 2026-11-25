@@ -14,6 +14,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "robomini_interfaces/msg/gimbal_to_vision.hpp"
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -82,6 +83,8 @@ public:
 
         pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>(
             "/vision/pending_target_pose", rclcpp::SensorDataQoS());
+
+        state_pub_ = create_publisher<std_msgs::msg::String>("/vision/rune_states", 10);
 
         feedback_sub_ = create_subscription<robomini_interfaces::msg::GimbalToVision>(
             "/gimbal_to_vision", rclcpp::SensorDataQoS(),
@@ -430,6 +433,14 @@ private:
                 }
             }
 
+            // 发布灯态识别结果（第一部分可验证输出）：pending=待激活, active=已激活
+            if (state_pub_) {
+                std_msgs::msg::String state_msg;
+                state_msg.data = "pending=" + std::to_string(pending_centers.size()) +
+                                 " active=" + std::to_string(tangential_pairs.size() - pending_centers.size());
+                state_pub_->publish(state_msg);
+            }
+
             std::optional<PoseMeasurement> pose_measurement;
             const char* pose_status = pending_centers.empty() ? "no_pending" : "ambiguous_pending";
             
@@ -534,6 +545,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
     rclcpp::Subscription<robomini_interfaces::msg::GimbalToVision>::SharedPtr feedback_sub_;
     sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_;
 

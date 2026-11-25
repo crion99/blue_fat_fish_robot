@@ -45,6 +45,7 @@ ament_target_dependencies(light_detector
     rclcpp
     sensor_msgs
     geometry_msgs
+    std_msgs
     robomini_interfaces
     tf2
     cv_bridge
@@ -92,6 +93,14 @@ add_executable(aim_follower src/aim_follower.cpp)
 target_include_directories(aim_follower PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../gz_plugins/src")
 ament_target_dependencies(aim_follower rclcpp std_msgs)
 
+# Aiming: 靶心位姿 -> 瞄准转角（第三部分，对接 /vision_to_gimbal）
+add_executable(pose_aim_node src/pose_aim_node.cpp)
+ament_target_dependencies(pose_aim_node
+    rclcpp
+    geometry_msgs
+    robomini_interfaces
+)
+
 # Install executables
 install(
     TARGETS
@@ -101,6 +110,7 @@ install(
         joint_state_adapter
         aim_node
         aim_follower
+        pose_aim_node
     DESTINATION lib/${PROJECT_NAME}
 )
 

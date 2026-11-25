@@ -1,0 +1,11 @@
+# 相机内参（示例值，必须用你自己的相机重新标定后替换）
+# 标定：ros2 run camera_calibration cameracalibrator 或 OpenCV 棋盘格标定
+# 输出顺序：dist = [k1, k2, p1, p2, k3]
+name: camera_usb
+width: 1280
+height: 720
+fx: 1200.0
+fy: 1200.0
+cx: 640.0
+cy: 360.0
+dist: [-0.12, 0.05, 0.0005, -0.0003, 0.0]

@@ -1,0 +1,30 @@
+# 灯效识别参数（第一部分）
+# 默认按“待激活=蓝色常亮、已激活=红色高亮/闪烁”标定，实机必须用实拍片段复核。
+# 标定方法见 README「4 阈值标定」。
+
+# --- 空间：LED 亮点检测 ---
+vMin: 110          # 亮度下限 0..255
+sMin: 85           # 饱和度下限 0..255
+downsample: 2      # 2 = 先 2x2 均值降采样，速度约 4 倍
+blobMinArea: 40    # 原分辨率下的最小连通域面积（像素）
+blobMaxArea: 120000
+blobMaxAspect: 8.0
+clusterRadiusPx: 320
+boxMarginPx: 16
+
+# --- 颜色判据（H 0..179，与 OpenCV 一致）---
+hueActiveCenter: 5        # 已激活偏红
+hueActiveTolerance: 14
+hueInactiveCenter: 105    # 待激活偏蓝
+hueInactiveTolerance: 25
+activeHueRatioOn: 0.50    # 激活色相面积占比阈值
+
+# --- 时域判据 ---
+brightnessActive: 190.0   # 已激活亮度下限
+modulationOn: 0.20        # 亮度调制深度阈值
+blinkHzMin: 0.5
+blinkHzMax: 15.0
+windowFrames: 45          # 1.5 s @30fps
+windowSeconds: 1.5
+switchFrames: 5           # 连续 5 帧一致才切换（迟滞）
+scoreThreshold: 0.50
