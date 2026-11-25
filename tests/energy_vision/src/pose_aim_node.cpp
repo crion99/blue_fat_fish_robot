@@ -47,6 +47,7 @@ public:
     declare_parameter("fire_mode", 1);      // 1=只跟瞄 2=跟瞄并开火
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
+    declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
     declare_parameter("smooth_alpha", 0.4);      // 指令低通系数，越小越“钝”越不易过冲
     declare_parameter("max_cmd_rate_radps", 3.0);  // 单帧限速，防止猛摆冲出视野
 
@@ -55,6 +56,7 @@ public:
     fire_mode_ = get_parameter("fire_mode").as_int();
     latency_s_ = get_parameter("latency_s").as_double();
     stale_timeout_s_ = get_parameter("stale_timeout_s").as_double();
+    dead_reckon_s_ = get_parameter("dead_reckon_s").as_double();
     smooth_alpha_ = get_parameter("smooth_alpha").as_double();
     max_cmd_rate_radps_ = get_parameter("max_cmd_rate_radps").as_double();
 
@@ -161,7 +163,23 @@ private:
   {
     if (last_pose_time_.nanoseconds() == 0) return;  // 从未收到目标，不干预
     const rclcpp::Time now = get_clock()->now();
-    if ((now - last_pose_time_).seconds() <= stale_timeout_s_) return;
+    const double age = (now - last_pose_time_).seconds();
+    if (age <= stale_timeout_s_) return;
+
+    // 短时丢失：按最近角速度航位推算，继续保持扫动，等靶子转回视野，而不是立刻停住
+    if (age <= stale_timeout_s_ + dead_reckon_s_ && std::fabs(yaw_rate_) > 0.05) {
+      const double elapsed = age - stale_timeout_s_;
+      auto cmd = robomini_interfaces::msg::VisionToGimbal();
+      cmd.mode = 1;  // 只跟不射
+      cmd.yaw = last_cmd_yaw_ + yaw_rate_ * elapsed;
+      cmd.pitch = last_cmd_pitch_;
+      cmd.yaw_vel = 0.0;
+      cmd.yaw_acc = 0.0;
+      cmd.pitch_vel = 0.0;
+      cmd.pitch_acc = 0.0;
+      cmd_pub_->publish(cmd);
+      return;
+    }
 
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
     cmd.mode = 0;  // 不控制，云台保持
@@ -175,8 +193,7 @@ private:
     last_cmd_yaw_ = yaw_;
     last_cmd_pitch_ = pitch_;
     cmd_pub_->publish(cmd);
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "目标丢失 %.1f s，发送 mode=0",
-                         (now - last_pose_time_).seconds());
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "目标丢失 %.1f s，发送 mode=0", age);
   }
 
   double t_cam_x_{0.0};
@@ -184,6 +201,7 @@ private:
   int fire_mode_{1};
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
+  double dead_reckon_s_{0.50};
   double smooth_alpha_{0.4};
   double max_cmd_rate_radps_{3.0};
   bool has_cmd_{false};
