@@ -1,0 +1,1 @@
+/home/yomi/projects/robomini_sim/gz_plugins/install/lib/librobomini_sim_system.so

@@ -1,0 +1,8 @@
+[0.000000] (-) TimerEvent: {}
+[0.000295] (-) JobUnselected: {'identifier': 'robomini_interfaces'}
+[0.000351] (-) JobUnselected: {'identifier': 'robomini_sim'}
+[0.000383] (-) JobUnselected: {'identifier': 'robomini_sim_plugin'}
+[0.000410] (energy_vision) JobQueued: {'identifier': 'energy_vision', 'dependencies': OrderedDict({'robomini_interfaces': '/home/yomi/projects/robomini_sim/install/robomini_interfaces'})}
+[0.000449] (energy_vision) JobStarted: {'identifier': 'energy_vision'}
+[0.010120] (energy_vision) JobEnded: {'identifier': 'energy_vision', 'rc': 1}
+[0.020538] (-) EventReactorShutdown: {}
