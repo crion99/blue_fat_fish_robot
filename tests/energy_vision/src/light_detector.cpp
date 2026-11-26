@@ -1,6 +1,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <map>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
@@ -430,25 +431,49 @@ private:
                 ++cluster_id;
             }
 
+            // 按簇统计灯条：4 根 = 待激活（pending，径向+切向全亮），2 根 = 已激活（active，只亮切向）。
+            // 不再用“云台中心方向”去分径向/切向——靶板 4 根灯条是 90° 等分的方形，
+            // 与中心方向的夹角随靶位置变化，旧做法会把同一块靶切成两对“切向”，画出两个 Active 框。
             std::vector<LightPair> radial_pairs;
             std::vector<LightPair> tangential_pairs;
+            std::map<int, std::vector<int>> clusters;
             for (std::size_t i = 0; i < light_centers.size(); ++i) {
-                for (std::size_t j = i + 1; j < light_centers.size(); ++j) {
-                    if (cluster_of[i] != cluster_of[j]) continue;
-                    const cv::Point2d first(light_centers[i]);
-                    const cv::Point2d second(light_centers[j]);
-                    const cv::Point2d center = (first + second) * 0.5;
-                    const cv::Point2d radial = center - hub;
-                    const cv::Point2d offset = second - first;
-                    const double radius = cv::norm(radial);
-                    const double separation = cv::norm(offset);
-                    if (radius < 1.0 || separation < 0.06 * radius || separation > 0.40 * radius) continue;
+                clusters[cluster_of[i]].push_back(static_cast<int>(i));
+            }
 
-                    const double alignment = std::abs(offset.dot(radial)) / (separation * radius);
-                    if (alignment > 0.80)
-                        radial_pairs.push_back(first.dot(radial) < second.dot(radial) ? LightPair{center, separation, first, second} : LightPair{center, separation, second, first});
-                    else if (alignment < 0.45)
-                        tangential_pairs.push_back({center, separation, first, second});
+            for (const auto& kv : clusters) {
+                const std::vector<int>& idxs = kv.second;
+                if (idxs.size() != 2 && idxs.size() != 4) continue;
+
+                cv::Point2d center(0.0, 0.0);
+                for (int i : idxs) center += cv::Point2d(light_centers[i]);
+                center *= 1.0 / static_cast<double>(idxs.size());
+
+                double max_sep = 12.0;
+                for (std::size_t a = 0; a < idxs.size(); ++a)
+                    for (std::size_t b = a + 1; b < idxs.size(); ++b)
+                        max_sep = std::max(max_sep,
+                                           cv::norm(light_centers[idxs[a]] - light_centers[idxs[b]]));
+
+                if (idxs.size() == 4) {
+                    // 按极角排序，取两条对角线分别当“径向/切向”两对（点序无关，PnP 会自解旋转）
+                    std::vector<int> sorted = idxs;
+                    std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+                        const double aa = std::atan2(light_centers[a].y - center.y,
+                                                     light_centers[a].x - center.x);
+                        const double bb = std::atan2(light_centers[b].y - center.y,
+                                                     light_centers[b].x - center.x);
+                        return aa < bb;
+                    });
+                    const cv::Point2d p0(light_centers[sorted[0]]), p1(light_centers[sorted[1]]);
+                    const cv::Point2d p2(light_centers[sorted[2]]), p3(light_centers[sorted[3]]);
+                    radial_pairs.push_back({center, max_sep, p0, p2});
+                    tangential_pairs.push_back({center, max_sep, p1, p3});
+                } else {
+                    // 只有 2 根 → 已激活：没有配对径向对，天然判为 Active
+                    tangential_pairs.push_back(
+                        {center, max_sep, cv::Point2d(light_centers[idxs[0]]),
+                         cv::Point2d(light_centers[idxs[1]])});
                 }
             }
 
