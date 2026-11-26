@@ -45,7 +45,7 @@ public:
     declare_parameter("cam_fwd_m", 0.036);   // 相机光心相对俯仰轴：沿枪管向前（m）
     declare_parameter("cam_up_m", 0.075);    // 相机光心相对俯仰轴：向上（m）
     declare_parameter("muzzle_fwd_m", 0.095);// 枪口相对俯仰轴：沿枪管向前（m）
-    declare_parameter("fire_mode", 2);      // 0=只跟 1=跟踪即开火 2=锁定后开火（默认）
+    declare_parameter("fire_mode", 1);      // 0=只跟不射 1=识别到就射 2=对准才射
     declare_parameter("fire_align_deg", 1.5);  // 锁定开火：云台追平指令角（含提前量）的阈值（度）
     declare_parameter("gravity", 9.81);     // 重力补偿（m/s²），0 表示关闭
     declare_parameter("pitch_offset_deg", 0.0);  // 实测标定的固定仰角偏置（度）
@@ -161,16 +161,18 @@ private:
     last_cmd_pitch_ = pitch_cmd;
 
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
-    uint8_t fire_cmd = static_cast<uint8_t>(std::clamp(fire_mode_, 0, 2));
-    if (fire_cmd == 2) {
-      // 到位判断：云台追平指令角，或靶心已经落在光轴附近（两者满足其一即可开火）。
-      // 打旋转靶时枪管指向目标未来位置、靶心不会居中，且云台一直在转，
-      // 所以不能拿“靶心居中/云台停稳”单独当判据。
+    // fire_mode 语义（对外）：0=只跟不射；1=识别到就射；2=对准才射
+    // 注意 VisionToGimbal.mode 的语义是 0=不控制 / 1=控制不射 / 2=控制并开火，
+    // 两者不是一回事，必须显式换算（之前的写法把 1 直接当 mode，导致“跟踪即开火”其实不开火）。
+    uint8_t fire_cmd = 1;  // 默认：控制云台但不发射
+    if (fire_mode_ == 1) {
+      fire_cmd = 2;        // 识别到目标就开火
+    } else if (fire_mode_ == 2) {
       const double align = fire_align_deg_ * M_PI / 180.0;
       const bool caught_up = std::fabs(wrapAngle(yaw_ - last_cmd_yaw_)) < align &&
                              std::fabs(pitch_ - last_cmd_pitch_) < align;
       const bool centered = std::fabs(rel_yaw) < align && std::fabs(rel_pitch) < align;
-      if (!(caught_up || centered)) fire_cmd = 1;
+      fire_cmd = (caught_up || centered) ? 2 : 1;
     }
     cmd.mode = fire_cmd;
     cmd.yaw = yaw_cmd;
@@ -227,7 +229,7 @@ private:
   double cam_fwd_{0.036};
   double cam_up_{0.075};
   double muzzle_fwd_{0.095};
-  int fire_mode_{2};
+  int fire_mode_{1};
   double fire_align_deg_{1.5};
   double gravity_{9.81};
   double pitch_offset_deg_{0.0};

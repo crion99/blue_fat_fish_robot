@@ -409,7 +409,7 @@ private:
                 hub_y = cvRound(c.y);
             }
 
-            cv::circle(frame, cv::Point(hub_x, hub_y), 6, cv::Scalar(255, 255, 0), -1);
+            // 机关中心不再画出来（调试用，正式画面保持干净）
 
             const cv::Point2d hub(hub_x, hub_y);
             std::vector<LightPair> radial_pairs;
