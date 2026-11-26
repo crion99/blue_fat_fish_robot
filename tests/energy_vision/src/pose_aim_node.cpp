@@ -42,8 +42,9 @@ class PoseAimNode : public rclcpp::Node
 public:
   PoseAimNode() : Node("pose_aim_node")
   {
-    declare_parameter("t_cam_x", 0.00);     // 相机相对云台旋转中心的沿枪管偏移（m）
-    declare_parameter("t_muzzle_x", 0.10);  // 枪口沿枪管方向的偏移（m）
+    declare_parameter("cam_fwd_m", 0.036);   // 相机光心相对俯仰轴：沿枪管向前（m）
+    declare_parameter("cam_up_m", 0.075);    // 相机光心相对俯仰轴：向上（m）
+    declare_parameter("muzzle_fwd_m", 0.095);// 枪口相对俯仰轴：沿枪管向前（m）
     declare_parameter("fire_mode", 2);      // 0=只跟 1=跟踪即开火 2=锁定后开火（默认）
     declare_parameter("fire_align_deg", 1.5);  // 锁定开火：云台追平指令角（含提前量）的阈值（度）
     declare_parameter("gravity", 9.81);     // 重力补偿（m/s²），0 表示关闭
@@ -54,8 +55,9 @@ public:
     declare_parameter("smooth_alpha", 0.4);      // 指令低通系数，越小越“钝”越不易过冲
     declare_parameter("max_cmd_rate_radps", 3.0);  // 单帧限速，防止猛摆冲出视野
 
-    t_cam_x_ = get_parameter("t_cam_x").as_double();
-    t_muzzle_x_ = get_parameter("t_muzzle_x").as_double();
+    cam_fwd_ = get_parameter("cam_fwd_m").as_double();
+    cam_up_ = get_parameter("cam_up_m").as_double();
+    muzzle_fwd_ = get_parameter("muzzle_fwd_m").as_double();
     fire_mode_ = get_parameter("fire_mode").as_int();
     fire_align_deg_ = get_parameter("fire_align_deg").as_double();
     gravity_ = get_parameter("gravity").as_double();
@@ -79,8 +81,8 @@ public:
     // 低速率兜底：目标丢失超时后发 mode=0，让云台保持/停止而不是悬着旧指令
     stale_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() { onStaleCheck(); });
 
-    RCLCPP_INFO(get_logger(), "pose_aim_node 启动：t_cam=%.3f t_muzzle=%.3f fire_mode=%d",
-                t_cam_x_, t_muzzle_x_, fire_mode_);
+    RCLCPP_INFO(get_logger(), "pose_aim_node 启动：cam(%.3f,%.3f) muzzle=%.3f fire_mode=%d",
+                cam_fwd_, cam_up_, muzzle_fwd_, fire_mode_);
   }
 
 private:
@@ -106,15 +108,13 @@ private:
     // 无论是否开 use_sim_time 都在同一个时间域，判停逻辑才是对的。
     last_pose_time_ = get_clock()->now();
 
-    // 相机系 -> 云台系
-    const double gx = cz + t_cam_x_;
-    const double gy = -cx;
-    const double gz = -cy;
-
-    // 枪口偏移：瞄准方向从枪口出发
-    const double dx = gx - t_muzzle_x_;
-    const double dy = gy;
-    const double dz = gz;
+    // 相机系 -> 云台系（云台系：x 沿枪管向前、y 向左、z 向上）。
+    // 相机光心在 pitch_link 内位于 (cam_fwd, 0, cam_up)，枪口在 (muzzle_fwd, 0, 0)。
+    // 靶心相机系坐标 (cx 右, cy 下, cz 前) 转云台系方向为 (cz 前, -cx 左, -cy 上)，
+    // 因此 枪口 -> 靶心 = (cam_fwd + cz - muzzle_fwd, -cx, cam_up - cy)。
+    const double dx = cam_fwd_ + cz - muzzle_fwd_;
+    const double dy = -cx;
+    const double dz = cam_up_ - cy;
 
     const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
     const double rel_yaw = std::atan2(dy, dx);
@@ -223,8 +223,9 @@ private:
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "目标丢失 %.1f s，发送 mode=0", age);
   }
 
-  double t_cam_x_{0.0};
-  double t_muzzle_x_{0.10};
+  double cam_fwd_{0.036};
+  double cam_up_{0.075};
+  double muzzle_fwd_{0.095};
   int fire_mode_{2};
   double fire_align_deg_{1.5};
   double gravity_{9.81};
