@@ -72,6 +72,33 @@ ros2 run energy_vision pose_aim_node
   ros2 topic echo /rune/state --field targets   # 真值，仅调试对照，不要进提交逻辑
   ```
 
+## YOLO 方案（可选，替换灯条检测）
+
+当 HSV + 几何配对在遮挡/合并灯条下不稳时，可用一个小 YOLO 直接检测“待激活/已激活”靶板。
+**下游 `pose_aim_node` 完全不用改**——YOLO 节点输出同样的 `/vision/pending_target_pose`。
+
+```bash
+# 0) 只装一次
+pip install ultralytics
+
+# 1) 采帧（仿真跑着、多角度多阶段各采一轮；每类建议 150~300 张）
+ros2 run energy_vision collect_frames --ros-args -p out_dir:=yolo_frames -p every:=10
+
+# 2) 用 labelImg 标框，两类：pending(0) / active(1)，导出 YOLO 格式到 yolo/
+#    yolo/images/train/*.jpg  yolo/labels/train/*.txt  （val 同理，留 20%）
+
+# 3) 训练（scripts/data.yaml 是配置模板，复制到 yolo/data.yaml 后改 path）
+python3 scripts/train_yolo.py --data yolo/data.yaml --epochs 80
+#   产物：yolo/runs/rune/weights/best.pt
+
+# 4) 推理运行（与 light_detector 二选一，别同时开）
+ros2 run energy_vision yolo_target_node --ros-args \
+  -p model:=yolo/runs/rune/weights/best.pt -p conf:=0.35
+```
+
+原理：框中心 → 角度，框宽 → 距离（`d = fx·靶板宽/框宽`），再交给 `pose_aim_node` 做瞄准与重力补偿。
+调试画面：`/vision/yolo_debug`。
+
 ## 第四部分（击打各阶段）
 
 开火不需要额外代码：`pose_aim_node` 默认 `fire_mode=2`（锁定后开火），对准且追平指令角时自动发
