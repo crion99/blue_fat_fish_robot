@@ -46,6 +46,7 @@ public:
     declare_parameter("t_muzzle_x", 0.10);  // 枪口沿枪管方向的偏移（m）
     declare_parameter("fire_mode", 2);      // 0=只跟 1=跟踪即开火 2=锁定后开火（默认）
     declare_parameter("fire_align_deg", 1.5);  // 锁定开火：云台追平指令角（含提前量）的阈值（度）
+    declare_parameter("gravity", 9.81);     // 重力补偿（m/s²），0 表示关闭
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
@@ -56,6 +57,7 @@ public:
     t_muzzle_x_ = get_parameter("t_muzzle_x").as_double();
     fire_mode_ = get_parameter("fire_mode").as_int();
     fire_align_deg_ = get_parameter("fire_align_deg").as_double();
+    gravity_ = get_parameter("gravity").as_double();
     latency_s_ = get_parameter("latency_s").as_double();
     stale_timeout_s_ = get_parameter("stale_timeout_s").as_double();
     dead_reckon_s_ = get_parameter("dead_reckon_s").as_double();
@@ -118,6 +120,14 @@ private:
 
     double raw_yaw = yaw_ + rel_yaw;
     double raw_pitch = pitch_ + rel_pitch;
+
+    // 重力补偿：球在飞行途中下坠，抬高仰角。dx/dy 是云台系里的水平方向分量
+    if (gravity_ > 0.0) {
+      const double d_horiz = std::hypot(dx, dy);
+      const double t_flight = d_horiz / bullet_speed_;
+      const double drop = 0.5 * gravity_ * t_flight * t_flight;
+      raw_pitch += std::atan2(drop, d_horiz);
+    }
 
     // 旋转靶提前量（先加在原始目标上，再一起平滑）
     const double flight = distance / bullet_speed_;
@@ -212,6 +222,7 @@ private:
   double t_muzzle_x_{0.10};
   int fire_mode_{2};
   double fire_align_deg_{1.5};
+  double gravity_{9.81};
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};

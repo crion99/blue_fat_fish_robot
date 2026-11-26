@@ -51,6 +51,7 @@ ros2 run energy_vision pose_aim_node
 | `t_cam_x` / `t_muzzle_x` | 0.00 / 0.10 | 相机、枪口沿枪管方向的安装偏移（m） |
 | `fire_mode` | 2 | 0=只跟；1=跟踪即开火；2=锁定后开火（默认推荐） |
 | `fire_align_deg` | 1.5 | 锁定开火：云台追平“带提前量的指令角”的阈值（度） |
+| `gravity` | 9.81 | 重力补偿（m/s²），球下坠抬高仰角；0 关闭 |
 | `latency_s` | 0.03 | 图像→出弹总延迟，用于旋转靶提前量 |
 | `stale_timeout_s` | 0.40 | 目标丢失超过该时长后发 `mode=0` 停控 |
 | `dead_reckon_s` | 0.50 | 丢失后按角速度航位推算、保持扫动的时长 |
@@ -71,8 +72,9 @@ ros2 run energy_vision pose_aim_node
 
 ## 第四部分（击打各阶段）
 
-开火不需要额外代码：`pose_aim_node` 默认 `fire_mode=2`（锁定后开火），对准且云台停稳时自动发
-`mode=2`，仿真 `launcher_node` 按 3 发/s 节流发射并自己判定命中。
+开火不需要额外代码：`pose_aim_node` 默认 `fire_mode=2`（锁定后开火），对准且追平指令角时自动发
+`mode=2`，仿真 `launcher_node` 按 3 发/s 节流发射并自己判定命中。球速固定 12 m/s（`launcher_node`
+的 `default_speed`），且**已内置重力补偿**（`gravity` 参数，默认 9.81）：球飞行中下坠，仰角自动抬高。
 
 - 看命中：`ros2 topic echo /rune/hit`（`valid=true` 且 `score>0` 才算有效命中）；
 - 看总分：`ros2 topic echo /score`（`total`、`mode_hits[0..3]`、`penalty`、`balls_fired`）；
