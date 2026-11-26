@@ -412,10 +412,29 @@ private:
             // 机关中心不再画出来（调试用，正式画面保持干净）
 
             const cv::Point2d hub(hub_x, hub_y);
+
+            // 先按距离把灯条聚成“同一块靶板”，跨靶板的灯条禁止配对，
+            // 否则相邻靶板的灯条会被配到一起，画出重复的 Active 框。
+            constexpr double kPlateClusterPx = 90.0;
+            std::vector<int> cluster_of(light_centers.size(), -1);
+            int cluster_id = 0;
+            for (std::size_t i = 0; i < light_centers.size(); ++i) {
+                if (cluster_of[i] >= 0) continue;
+                cluster_of[i] = cluster_id;
+                for (std::size_t j = i + 1; j < light_centers.size(); ++j) {
+                    if (cluster_of[j] < 0 &&
+                        cv::norm(light_centers[i] - light_centers[j]) < kPlateClusterPx) {
+                        cluster_of[j] = cluster_id;
+                    }
+                }
+                ++cluster_id;
+            }
+
             std::vector<LightPair> radial_pairs;
             std::vector<LightPair> tangential_pairs;
             for (std::size_t i = 0; i < light_centers.size(); ++i) {
                 for (std::size_t j = i + 1; j < light_centers.size(); ++j) {
+                    if (cluster_of[i] != cluster_of[j]) continue;
                     const cv::Point2d first(light_centers[i]);
                     const cv::Point2d second(light_centers[j]);
                     const cv::Point2d center = (first + second) * 0.5;
