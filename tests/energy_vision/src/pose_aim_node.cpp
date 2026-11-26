@@ -163,13 +163,14 @@ private:
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
     uint8_t fire_cmd = static_cast<uint8_t>(std::clamp(fire_mode_, 0, 2));
     if (fire_cmd == 2) {
-      // 到位判断：云台是否追平“上一次”下发的目标角（已含提前量）。
-      // 打旋转靶时枪管指向的是目标未来位置，靶心不会居中、云台也一直在转，
-      // 所以不能拿“靶心居中/云台停稳”当判据，只能看“云台是否追平了指令”。
+      // 到位判断：云台追平指令角，或靶心已经落在光轴附近（两者满足其一即可开火）。
+      // 打旋转靶时枪管指向目标未来位置、靶心不会居中，且云台一直在转，
+      // 所以不能拿“靶心居中/云台停稳”单独当判据。
       const double align = fire_align_deg_ * M_PI / 180.0;
-      const bool settled = std::fabs(wrapAngle(yaw_ - last_cmd_yaw_)) < align &&
-                           std::fabs(pitch_ - last_cmd_pitch_) < align;
-      if (!settled) fire_cmd = 1;
+      const bool caught_up = std::fabs(wrapAngle(yaw_ - last_cmd_yaw_)) < align &&
+                             std::fabs(pitch_ - last_cmd_pitch_) < align;
+      const bool centered = std::fabs(rel_yaw) < align && std::fabs(rel_pitch) < align;
+      if (!(caught_up || centered)) fire_cmd = 1;
     }
     cmd.mode = fire_cmd;
     cmd.yaw = yaw_cmd;

@@ -316,15 +316,14 @@ private:
                 info->k[0] > 0.0 && info->k[4] > 0.0 && std::all_of(info->k.begin(), info->k.end(), [](double value) { return std::isfinite(value); }) &&
                 (info->d.empty() || (info->distortion_model == "plumb_bob" && info->d.size() == 5 && std::all_of(info->d.begin(), info->d.end(), [](double value) { return std::isfinite(value); })));
 
-            constexpr double hub_ray_x = (639.0 - 640.0) / 1108.5118865966797;
-            constexpr double hub_ray_y = (154.0 - 360.0) / 1108.5120105743408;
-            const int hub_x = calibrated ? cvRound(info->k[2] + info->k[0] * hub_ray_x) : 639;
-            const int hub_y = calibrated ? cvRound(info->k[5] + info->k[4] * hub_ray_y) : 154;
+            // 整幅画面都参与检测。
+            // 原实现把机关中心和 ROI 写死成固定像素（约 (639,154)、270px 半宽），
+            // 云台一俯仰或靶子转到轮盘另一侧就漏检；这里改成全图 + 后面动态估计中心。
+            const cv::Rect rune_roi(0, 0, frame.cols, frame.rows);
 
-            constexpr double reference_half_extent = 270.0;
-            const int half_width = cvCeil(reference_half_extent * (calibrated ? info->k[0] / 1108.5118865966797 : 1.0));
-            const int half_height = cvCeil(reference_half_extent * (calibrated ? info->k[4] / 1108.5120105743408 : 1.0));
-            const cv::Rect rune_roi = cv::Rect(hub_x - half_width, hub_y - half_height, 2 * half_width + 1, 2 * half_height + 1) & cv::Rect(0, 0, frame.cols, frame.rows);
+            // 机关中心：先给个回退值，找到灯条后按灯条重心更新
+            int hub_x = frame.cols / 2;
+            int hub_y = frame.rows / 3;
 
             cv::Mat blue_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
             std::vector<std::vector<cv::Point>> contours;
@@ -363,6 +362,51 @@ private:
 
                 cv::rectangle(frame, box, cv::Scalar(0, 255, 0), 2);
                 cv::circle(frame, cv::Point(cx, cy), 4, cv::Scalar(0, 0, 255), -1);
+            }
+
+            // 机关中心：用云台角 + 已知机关世界坐标投影到图像。
+            // （原实现写死 (639,154)，云台一俯仰就偏；蓝方：发射架 y=-2.07，机关中心 (0,-0.116,0.928)）
+            bool hub_ok = false;
+            if (calibrated && feedback_) {
+                const double yw = feedback_->yaw;
+                const double pt = feedback_->pitch;
+                const double cyw = std::cos(yw), syw = std::sin(yw);
+                const double cpt = std::cos(pt), spt = std::sin(pt);
+                // R = Rz(yaw)·Rx(pitch)
+                const double fwd[3] = {-syw * cpt, cyw * cpt, spt};  // R·(0,1,0)
+                const double upv[3] = {syw * spt, -cyw * spt, cpt};  // R·(0,0,1)
+                double xo[3] = {fwd[1] * upv[2] - fwd[2] * upv[1],
+                                fwd[2] * upv[0] - fwd[0] * upv[2],
+                                fwd[0] * upv[1] - fwd[1] * upv[0]};
+                const double xn = std::sqrt(xo[0] * xo[0] + xo[1] * xo[1] + xo[2] * xo[2]);
+                if (xn > 1e-9) {
+                    xo[0] /= xn; xo[1] /= xn; xo[2] /= xn;
+                    const double yo[3] = {fwd[1] * xo[2] - fwd[2] * xo[1],
+                                          fwd[2] * xo[0] - fwd[0] * xo[2],
+                                          fwd[0] * xo[1] - fwd[1] * xo[0]};
+                    const double camx = 0.036 * fwd[0] + 0.075 * upv[0];
+                    const double camy = -2.07 + 0.036 * fwd[1] + 0.075 * upv[1];
+                    const double camz = 0.495 + 0.036 * fwd[2] + 0.075 * upv[2];
+                    const double dxw = 0.0 - camx;
+                    const double dyw = -0.116 - camy;
+                    const double dzw = 0.928 - camz;
+                    const double zo = dxw * fwd[0] + dyw * fwd[1] + dzw * fwd[2];
+                    if (zo > 0.1) {
+                        const double xopt = dxw * xo[0] + dyw * xo[1] + dzw * xo[2];
+                        const double yopt = dxw * yo[0] + dyw * yo[1] + dzw * yo[2];
+                        hub_x = cvRound(info->k[2] + info->k[0] * xopt / zo);
+                        hub_y = cvRound(info->k[5] + info->k[4] * yopt / zo);
+                        hub_ok = true;
+                    }
+                }
+            }
+            // 投影不可用（无相机信息/无云台反馈）时退回灯条重心
+            if (!hub_ok && static_cast<int>(light_centers.size()) >= 4) {
+                cv::Point2d c(0.0, 0.0);
+                for (const auto& p : light_centers) c += cv::Point2d(p);
+                c *= 1.0 / static_cast<double>(light_centers.size());
+                hub_x = cvRound(c.x);
+                hub_y = cvRound(c.y);
             }
 
             cv::circle(frame, cv::Point(hub_x, hub_y), 6, cv::Scalar(255, 255, 0), -1);
