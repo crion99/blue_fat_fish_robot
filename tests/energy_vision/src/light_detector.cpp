@@ -347,9 +347,9 @@ private:
 
             for (const auto& contour : contours) {
                 double area = cv::contourArea(contour);
-                if (area < 40 || area > 2500) continue;
+                if (area < 25 || area > 2500) continue;
                 cv::Rect box = cv::boundingRect(contour);
-                if (box.width < 5 || box.height < 5 || box.width > 100 || box.height > 100) continue;
+                if (box.width < 3 || box.height < 3 || box.width > 100 || box.height > 100) continue;
                 double aspect = static_cast<double>(box.width) / box.height;
                 if (aspect < 0.2 || aspect > 5.0) continue;
                 cv::Moments m = cv::moments(contour);
@@ -423,12 +423,12 @@ private:
                     const cv::Point2d offset = second - first;
                     const double radius = cv::norm(radial);
                     const double separation = cv::norm(offset);
-                    if (radius < 1.0 || separation < 0.09 * radius || separation > 0.33 * radius) continue;
+                    if (radius < 1.0 || separation < 0.06 * radius || separation > 0.40 * radius) continue;
 
                     const double alignment = std::abs(offset.dot(radial)) / (separation * radius);
-                    if (alignment > 0.90)
+                    if (alignment > 0.80)
                         radial_pairs.push_back(first.dot(radial) < second.dot(radial) ? LightPair{center, separation, first, second} : LightPair{center, separation, second, first});
-                    else if (alignment < 0.30)
+                    else if (alignment < 0.45)
                         tangential_pairs.push_back({center, separation, first, second});
                 }
             }
@@ -436,10 +436,11 @@ private:
             std::vector<cv::Point> pending_centers;
             const LightPair* pending_radial = nullptr;
             const LightPair* pending_tangential = nullptr;
+            double best_pending_d2 = 1e18;  // 多个 pending 时取最靠近画面中心的那个
 
             for (const auto& pair : tangential_pairs) {
                 const auto radial = std::find_if(radial_pairs.begin(), radial_pairs.end(), [&pair](const LightPair& candidate) {
-                    return cv::norm(candidate.center - pair.center) < 0.35 * pair.separation;
+                    return cv::norm(candidate.center - pair.center) < 0.60 * pair.separation;
                 });
 
                 const bool pending = radial != radial_pairs.end();
@@ -472,8 +473,14 @@ private:
                 
                 if (pending) {
                     pending_centers.push_back(pixel);
-                    pending_radial = &*radial;
-                    pending_tangential = &pair;
+                    // 多个 pending 时选最靠近画面中心的（云台正瞄准它），避免直接判“ambiguous”丢弃
+                    const double d2 = (pixel.x - frame.cols * 0.5) * (pixel.x - frame.cols * 0.5) +
+                                      (pixel.y - frame.rows * 0.5) * (pixel.y - frame.rows * 0.5);
+                    if (d2 < best_pending_d2) {
+                        best_pending_d2 = d2;
+                        pending_radial = &*radial;
+                        pending_tangential = &pair;
+                    }
                 }
             }
 
@@ -487,9 +494,11 @@ private:
 
             std::optional<PoseMeasurement> pose_measurement;
             const char* pose_status = pending_centers.empty() ? "no_pending" : "ambiguous_pending";
-            
-            if (pending_centers.size() == 1) {
-                const cv::Point target_center = pending_centers.front();
+
+            if (pending_radial != nullptr && pending_tangential != nullptr) {
+                // 取最靠近画面中心的那个 pending 算位姿（多个 pending 不再直接丢弃）
+                const cv::Point2d tc2 = 0.5 * (pending_radial->center + pending_tangential->center);
+                const cv::Point target_center(cvRound(tc2.x), cvRound(tc2.y));
                 pose_status = "missing_camera_info";
                 if (calibrated) {
                     pose_measurement = draw_pose_reprojection(frame, *pending_radial, *pending_tangential, *info);
@@ -566,7 +575,11 @@ private:
 
             cv::putText(frame, "Light bars: " + std::to_string(light_count), cv::Point(20, 35), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
 
-            const std::optional<cv::Point> diagnostic_target = pending_centers.size() == 1 ? std::optional<cv::Point>(pending_centers.front()) : std::nullopt;
+            const std::optional<cv::Point> diagnostic_target =
+                pending_radial != nullptr
+                    ? std::optional<cv::Point>(cv::Point(cvRound(pending_radial->center.x),
+                                                         cvRound(pending_radial->center.y)))
+                    : std::nullopt;
             show_diagnostics(frame, *msg, diagnostic_target, pose_measurement, pose_status);
             
             if (pose_measurement && !msg->header.frame_id.empty())
