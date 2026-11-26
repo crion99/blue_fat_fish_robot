@@ -47,6 +47,7 @@ public:
     declare_parameter("fire_mode", 2);      // 0=只跟 1=跟踪即开火 2=锁定后开火（默认）
     declare_parameter("fire_align_deg", 1.5);  // 锁定开火：云台追平指令角（含提前量）的阈值（度）
     declare_parameter("gravity", 9.81);     // 重力补偿（m/s²），0 表示关闭
+    declare_parameter("pitch_offset_deg", 0.0);  // 实测标定的固定仰角偏置（度）
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
@@ -58,6 +59,7 @@ public:
     fire_mode_ = get_parameter("fire_mode").as_int();
     fire_align_deg_ = get_parameter("fire_align_deg").as_double();
     gravity_ = get_parameter("gravity").as_double();
+    pitch_offset_deg_ = get_parameter("pitch_offset_deg").as_double();
     latency_s_ = get_parameter("latency_s").as_double();
     stale_timeout_s_ = get_parameter("stale_timeout_s").as_double();
     dead_reckon_s_ = get_parameter("dead_reckon_s").as_double();
@@ -128,6 +130,9 @@ private:
       const double drop = 0.5 * gravity_ * t_flight * t_flight;
       raw_pitch += std::atan2(drop, d_horiz);
     }
+
+    // 实测标定的固定仰角偏置（球速/安装误差的一揽子补偿，默认 0）
+    raw_pitch += pitch_offset_deg_ * M_PI / 180.0;
 
     // 旋转靶提前量（先加在原始目标上，再一起平滑）
     const double flight = distance / bullet_speed_;
@@ -223,6 +228,7 @@ private:
   int fire_mode_{2};
   double fire_align_deg_{1.5};
   double gravity_{9.81};
+  double pitch_offset_deg_{0.0};
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};

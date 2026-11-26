@@ -52,6 +52,7 @@ ros2 run energy_vision pose_aim_node
 | `fire_mode` | 2 | 0=只跟；1=跟踪即开火；2=锁定后开火（默认推荐） |
 | `fire_align_deg` | 1.5 | 锁定开火：云台追平“带提前量的指令角”的阈值（度） |
 | `gravity` | 9.81 | 重力补偿（m/s²），球下坠抬高仰角；0 关闭 |
+| `pitch_offset_deg` | 0.0 | 实测标定的固定仰角偏置（度） |
 | `latency_s` | 0.03 | 图像→出弹总延迟，用于旋转靶提前量 |
 | `stale_timeout_s` | 0.40 | 目标丢失超过该时长后发 `mode=0` 停控 |
 | `dead_reckon_s` | 0.50 | 丢失后按角速度航位推算、保持扫动的时长 |
