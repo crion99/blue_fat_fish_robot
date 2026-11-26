@@ -132,5 +132,11 @@ if(BUILD_TESTING)
 endif()
 
 install(DIRECTORY launch urdf DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS
+    scripts/collect_frames.py
+    scripts/train_yolo.py
+    scripts/yolo_target_node.py
+    DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()

@@ -1,0 +1,15 @@
+# YOLO 靶板检测数据配置（放在 yolo/data.yaml）
+#
+# 类别：
+#   0 = pending  （待激活：径向+切向共 4 根灯条全亮）
+#   1 = active   （已激活：只亮切向 2 根）
+#
+# 与 scripts/train_yolo.py 配套使用。
+
+path: .
+train: images/train
+val: images/val
+
+names:
+  0: pending
+  1: active
