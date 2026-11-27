@@ -134,5 +134,11 @@ media/**/*.part
 secrets.*
 credentials*
 
-# 第三方仿真平台（单独 clone，不入库）
-algorithm/robomini_sim/
+# ---------- 妯″瀷鏉冮噸涓庤缁冧骇鐗╋紙浣撶Н澶э紝涓嶅叆搴擄級----------
+*.pt
+*.onnx
+*.engine
+yolo_runs/
+yolo_dataset/
+yolo_env/
+

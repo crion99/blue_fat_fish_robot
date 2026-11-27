@@ -8,14 +8,23 @@
 | 节点 | 作用 | 输入 | 输出 |
 | --- | --- | --- | --- |
 | `camera_node` | 取流/实时显示（帧率/截图/录制，第二部分） | `/camera/image_raw` | — |
-| `light_detector` | 灯效识别 + 标注 + 位姿（第一、三部分） | `/camera/image_raw` | `/vision/pending_target_pose`、`/vision/rune_states` |
-| `pose_aim_node` | 位姿 + 瞄准（第三部分） | `/vision/pending_target_pose`、`/gimbal_to_vision` | `/vision_to_gimbal` |
-| `aim_node` | 旧版像素伺服（参考） | `/vision/pending_target_pose` | `/aim/joint_target` |
+| `light_detector` | **方案 A**：HSV 灯条 + 标注 + 位姿（第一、三部分） | `/camera/image_raw` | `/vision/pending_target_pose`、`/vision/rune_states` |
+| `yolo_target_node` | **方案 B**：YOLO 检测靶板 + 位姿（第一、三部分） | `/camera/image_raw` | `/vision/pending_target_pose`、`/vision/rune_states` |
+| `pose_aim_node` | 位姿 → 瞄准角 + 开火（第三、四部分） | `/vision/pending_target_pose`、`/gimbal_to_vision` | `/vision_to_gimbal` |
+| `aim_node` / `aim_follower` / `joint_state_adapter` | 旧版像素伺服链路（**legacy，勿用**） | — | — |
 
-`pose_aim_node` 直接消费 `light_detector` 发布的 `/vision/pending_target_pose`
+**检测方案二选一**（不要同时开）：
+
+| 方案 | 启动 | 适用 |
+| --- | --- | --- |
+| A. HSV 灯条 | `ros2 run energy_vision light_detector` | 灯条分离清晰时 |
+| B. YOLO | `ros2 run energy_vision yolo_target_node --ros-args -p model:=<best.pt>` | 遮挡/灯条合并、追求稳定 |
+
+两种方案输出**同一个话题格式**，`pose_aim_node` 不用改。
+
+`pose_aim_node` 直接消费 `/vision/pending_target_pose`
 （`geometry_msgs/PoseStamped`，`position.x/y/z` 即靶心在相机光轴系的 右/下/前 坐标，米），
-内部完成 相机系→云台系 变换、枪口偏移修正、旋转靶提前量，再按仿真接口发 `/vision_to_gimbal`。
-无需角点话题。
+内部完成 相机系→云台系 变换、枪口偏移修正、重力补偿、旋转靶提前量，再按仿真接口发 `/vision_to_gimbal`。
 
 ## 构建（在 Ubuntu 24.04 上）
 
