@@ -26,6 +26,24 @@
 （`geometry_msgs/PoseStamped`，`position.x/y/z` 即靶心在相机光轴系的 右/下/前 坐标，米），
 内部完成 相机系→云台系 变换、枪口偏移修正、重力补偿、旋转靶提前量，再按仿真接口发 `/vision_to_gimbal`。
 
+## 一键启动（推荐）
+
+```bash
+# 编译一次
+cd ~/projects/robomini_sim/ros2_ws
+colcon build --symlink-install --packages-select energy_vision && source install/setup.bash
+```
+
+仿真跑起来后，**一条命令启动“检测 + 瞄准 + 开火”**：
+
+```bash
+ros2 launch energy_vision energy_vision.launch.py
+```
+
+- 默认用**包内自带的 YOLO 模型**（`share/energy_vision/models/rune_best.pt`），不用另外指定；
+- 可选参数：`use_hsv:=true`（改用 HSV 灯条方案）、`fire_mode:=2`（对准才射）、`show_camera:=true`（另开相机窗口）；
+- 注意 `use_yolo` 和 `use_hsv` **只能开一个**。
+
 ## 构建（在 Ubuntu 24.04 上）
 
 ```bash

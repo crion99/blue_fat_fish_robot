@@ -132,6 +132,8 @@ if(BUILD_TESTING)
 endif()
 
 install(DIRECTORY launch urdf DESTINATION share/${PROJECT_NAME})
+# 包内自带的 YOLO 权重（yolo_target_node 默认加载）
+install(DIRECTORY models DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
     scripts/collect_frames.py
     scripts/train_yolo.py

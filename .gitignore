@@ -142,3 +142,7 @@ yolo_runs/
 yolo_dataset/
 yolo_env/
 
+
+# 包内自带的模型权重允许入库（单个 30MB，低于 100MB 上限）
+!tests/energy_vision/models/*.pt
+
