@@ -1,0 +1,13 @@
+﻿# 蓝胖鱼 · 能量机关靶板检测数据集（YOLO 格式）
+#
+# 类别：0 = target（待打的那块靶：4 根灯条全亮的待激活靶）
+# 规模：train 264 张 / val 66 张，图像 1280x720，采集自 robomini_sim
+#
+# 训练（在 tests/energy_vision 目录下）：
+#   python3 scripts/train_yolo.py --data dataset/data.yaml --epochs 60
+path: .
+train: images/train
+val: images/val
+
+names:
+  0: target

@@ -104,6 +104,22 @@ ros2 run energy_vision pose_aim_node
 当 HSV + 几何配对在遮挡/合并灯条下不稳时，可用一个小 YOLO 直接检测“待激活/已激活”靶板。
 **下游 `pose_aim_node` 完全不用改**——YOLO 节点输出同样的 `/vision/pending_target_pose`。
 
+**包里已带数据集和权重，可直接复现**：
+
+| 内容 | 位置 |
+| --- | --- |
+| 数据集（264 训练 / 66 验证，YOLO 格式） | `dataset/` |
+| 训练好的权重（mAP50 ≈ 1.0） | `models/rune_best.pt`（节点默认加载） |
+
+直接重训：
+
+```bash
+cd tests/energy_vision
+python3 scripts/train_yolo.py --data dataset/data.yaml --epochs 60
+```
+
+重新采集/标注（想扩充数据时）：
+
 ```bash
 # 0) 只装一次
 pip install ultralytics
