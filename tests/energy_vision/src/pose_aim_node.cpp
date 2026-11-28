@@ -55,6 +55,9 @@ public:
     declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
     declare_parameter("max_cmd_rate_radps", 1.5);  // 单帧限速，防止猛摆冲出视野
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
+    declare_parameter("deadband_deg", 0.2);      // 死区：指令变化小于该值就不动
+    declare_parameter("yaw_sign", 1.0);          // 云台 yaw 方向：转向反了就设 -1
+    declare_parameter("pitch_sign", 1.0);        // 云台 pitch 方向：反了就设 -1
 
     cam_fwd_ = get_parameter("cam_fwd_m").as_double();
     cam_up_ = get_parameter("cam_up_m").as_double();
@@ -69,6 +72,9 @@ public:
     smooth_alpha_ = get_parameter("smooth_alpha").as_double();
     max_cmd_rate_radps_ = get_parameter("max_cmd_rate_radps").as_double();
     input_alpha_ = get_parameter("input_alpha").as_double();
+    deadband_rad_ = get_parameter("deadband_deg").as_double() * kDeg2Rad;
+    yaw_sign_ = get_parameter("yaw_sign").as_double();
+    pitch_sign_ = get_parameter("pitch_sign").as_double();
 
     pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/vision/pending_target_pose", rclcpp::SensorDataQoS(),
@@ -131,8 +137,9 @@ private:
     const double dz = cam_up_ - fy_;
 
     const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const double rel_yaw = std::atan2(dy, dx);
-    const double rel_pitch = std::atan2(dz, std::hypot(dx, dy));
+    // 方向符号可配：若云台“追着靶子越跑越远”，把对应 *_sign 设成 -1
+    const double rel_yaw = std::atan2(dy, dx) * yaw_sign_;
+    const double rel_pitch = std::atan2(dz, std::hypot(dx, dy)) * pitch_sign_;
 
     double raw_yaw = yaw_ + rel_yaw;
     double raw_pitch = pitch_ + rel_pitch;
@@ -169,10 +176,19 @@ private:
     double d_pitch = smoothed_pitch_ - last_cmd_pitch_;
     d_yaw = std::clamp(d_yaw, -max_step, max_step);
     d_pitch = std::clamp(d_pitch, -max_step, max_step);
-    const double yaw_cmd = last_cmd_yaw_ + d_yaw;
-    const double pitch_cmd = last_cmd_pitch_ + d_pitch;
-    last_cmd_yaw_ = yaw_cmd;
-    last_cmd_pitch_ = pitch_cmd;
+    const double yaw_cmd0 = last_cmd_yaw_ + d_yaw;
+    const double pitch_cmd0 = last_cmd_pitch_ + d_pitch;
+    // 死区：指令变化太小时保持不动，避免在靶心附近反复微调
+    double yaw_cmd = yaw_cmd0;
+    double pitch_cmd = pitch_cmd0;
+    if (std::fabs(wrapAngle(yaw_cmd0 - last_cmd_yaw_)) >= deadband_rad_ ||
+        std::fabs(pitch_cmd0 - last_cmd_pitch_) >= deadband_rad_) {
+      last_cmd_yaw_ = yaw_cmd0;
+      last_cmd_pitch_ = pitch_cmd0;
+    } else {
+      yaw_cmd = last_cmd_yaw_;
+      pitch_cmd = last_cmd_pitch_;
+    }
 
     auto cmd = robomini_interfaces::msg::VisionToGimbal();
     // fire_mode 语义（对外）：0=只跟不射；1=识别到就射；2=对准才射
@@ -253,6 +269,9 @@ private:
   double smooth_alpha_{0.3};
   double max_cmd_rate_radps_{1.5};
   double input_alpha_{0.35};
+  double deadband_rad_{0.2 * kDeg2Rad};
+  double yaw_sign_{1.0};
+  double pitch_sign_{1.0};
   bool has_input_{false};
   double fx_{0.0};
   double fy_{0.0};
