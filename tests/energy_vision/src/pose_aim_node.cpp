@@ -52,8 +52,9 @@ public:
     declare_parameter("latency_s", 0.03);   // 图像到出弹总延迟（s）
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
-    declare_parameter("smooth_alpha", 0.4);      // 指令低通系数，越小越“钝”越不易过冲
-    declare_parameter("max_cmd_rate_radps", 3.0);  // 单帧限速，防止猛摆冲出视野
+    declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
+    declare_parameter("max_cmd_rate_radps", 1.5);  // 单帧限速，防止猛摆冲出视野
+    declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
 
     cam_fwd_ = get_parameter("cam_fwd_m").as_double();
     cam_up_ = get_parameter("cam_up_m").as_double();
@@ -67,6 +68,7 @@ public:
     dead_reckon_s_ = get_parameter("dead_reckon_s").as_double();
     smooth_alpha_ = get_parameter("smooth_alpha").as_double();
     max_cmd_rate_radps_ = get_parameter("max_cmd_rate_radps").as_double();
+    input_alpha_ = get_parameter("input_alpha").as_double();
 
     pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/vision/pending_target_pose", rclcpp::SensorDataQoS(),
@@ -102,6 +104,18 @@ private:
 
     if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(cz) || cz <= 0.05) return;
 
+    // 输入低通：检测框中心/距离逐帧抖动，直接算角会让云台跟着抖
+    if (!has_input_) {
+      fx_ = cx;
+      fy_ = cy;
+      fz_ = cz;
+      has_input_ = true;
+    } else {
+      fx_ += input_alpha_ * (cx - fx_);
+      fy_ += input_alpha_ * (cy - fy_);
+      fz_ += input_alpha_ * (cz - fz_);
+    }
+
     // 用“收到消息的时刻”记时间戳，而不是消息里的 header.stamp。
     // 关键：msg.header.stamp 是仿真时间，而 get_clock()->now() 在没开 use_sim_time 时是墙钟时间，
     // 两者相减会差 ~1.7e9 秒，导致“目标丢失”误报。统一用 get_clock()->now() 后，
@@ -112,9 +126,9 @@ private:
     // 相机光心在 pitch_link 内位于 (cam_fwd, 0, cam_up)，枪口在 (muzzle_fwd, 0, 0)。
     // 靶心相机系坐标 (cx 右, cy 下, cz 前) 转云台系方向为 (cz 前, -cx 左, -cy 上)，
     // 因此 枪口 -> 靶心 = (cam_fwd + cz - muzzle_fwd, -cx, cam_up - cy)。
-    const double dx = cam_fwd_ + cz - muzzle_fwd_;
-    const double dy = -cx;
-    const double dz = cam_up_ - cy;
+    const double dx = cam_fwd_ + fz_ - muzzle_fwd_;
+    const double dy = -fx_;
+    const double dz = cam_up_ - fy_;
 
     const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
     const double rel_yaw = std::atan2(dy, dx);
@@ -236,8 +250,13 @@ private:
   double latency_s_{0.03};
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};
-  double smooth_alpha_{0.4};
-  double max_cmd_rate_radps_{3.0};
+  double smooth_alpha_{0.3};
+  double max_cmd_rate_radps_{1.5};
+  double input_alpha_{0.35};
+  bool has_input_{false};
+  double fx_{0.0};
+  double fy_{0.0};
+  double fz_{0.0};
   bool has_cmd_{false};
   double smoothed_yaw_{0.0};
   double smoothed_pitch_{0.0};

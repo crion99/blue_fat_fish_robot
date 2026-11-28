@@ -52,6 +52,9 @@ class YoloTargetNode(Node):
         self.declare_parameter('model', '')
         self.declare_parameter('conf', 0.30)
         self.declare_parameter('plate_width_m', 0.195)  # 靶板真实宽度（m）
+        # 本仿真里机关位置固定，用固定距离最稳；设为 0 则用框宽估算（会抖）
+        self.declare_parameter('nominal_distance_m', 1.9)
+        self.declare_parameter('center_alpha', 0.5)     # 框中心低通
         self.declare_parameter('publish_debug_image', True)
 
         model_path = self.get_parameter('model').value or _default_model_path()
@@ -60,7 +63,10 @@ class YoloTargetNode(Node):
         self.model = YOLO(model_path)
         self.conf = float(self.get_parameter('conf').value)
         self.plate_w = float(self.get_parameter('plate_width_m').value)
+        self.nominal_d = float(self.get_parameter('nominal_distance_m').value)
+        self.center_alpha = float(self.get_parameter('center_alpha').value)
         self.publish_debug = bool(self.get_parameter('publish_debug_image').value)
+        self._uv = None  # 框中心低通状态
 
         self.bridge = CvBridge()
         self.fx = self.fy = self.cx = self.cy = 0.0
@@ -107,7 +113,20 @@ class YoloTargetNode(Node):
             return  # 没有待激活靶 -> 不发位姿，下游自动停控
 
         _, u, v, w_px = best
-        distance = self.fx * self.plate_w / max(w_px, 1.0)
+        # 框中心低通，抑制逐帧抖动
+        if self._uv is None:
+            self._uv = (u, v)
+        else:
+            a = self.center_alpha
+            self._uv = (self._uv[0] + a * (u - self._uv[0]),
+                        self._uv[1] + a * (v - self._uv[1]))
+        u, v = self._uv
+
+        # 距离：优先用固定标称距离（本仿真机关位置固定），否则用框宽估算
+        if self.nominal_d > 0.0:
+            distance = self.nominal_d
+        else:
+            distance = self.fx * self.plate_w / max(w_px, 1.0)
 
         out = PoseStamped()
         out.header = msg.header

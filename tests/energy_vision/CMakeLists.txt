@@ -134,11 +134,8 @@ endif()
 install(DIRECTORY launch urdf DESTINATION share/${PROJECT_NAME})
 # 包内自带的 YOLO 权重（yolo_target_node 默认加载）
 install(DIRECTORY models DESTINATION share/${PROJECT_NAME})
-install(PROGRAMS
-    scripts/collect_frames.py
-    scripts/train_yolo.py
-    scripts/yolo_target_node.py
-    DESTINATION lib/${PROJECT_NAME}
-)
+install(PROGRAMS scripts/collect_frames.py DESTINATION lib/${PROJECT_NAME} RENAME collect_frames)
+install(PROGRAMS scripts/train_yolo.py DESTINATION lib/${PROJECT_NAME} RENAME train_yolo)
+install(PROGRAMS scripts/yolo_target_node.py DESTINATION lib/${PROJECT_NAME} RENAME yolo_target_node)
 
 ament_package()
