@@ -56,6 +56,7 @@ class YoloTargetNode(Node):
         self.declare_parameter('plate_width_m', 0.195)
         self.declare_parameter('nominal_distance_m', 1.9)  # 0 = 用框宽估算
         self.declare_parameter('center_alpha', 0.5)
+        self.declare_parameter('target_gate_px', 120.0)  # 目标连续性门限：超出行走距离才换靶
         self.declare_parameter('publish_debug_image', True)
 
         model_path = self.get_parameter('model').value or _default_model_path()
@@ -66,7 +67,9 @@ class YoloTargetNode(Node):
         self.plate_w = float(self.get_parameter('plate_width_m').value)
         self.nominal_d = float(self.get_parameter('nominal_distance_m').value)
         self.center_alpha = float(self.get_parameter('center_alpha').value)
+        self.target_gate_px = float(self.get_parameter('target_gate_px').value)
         self.publish_debug = bool(self.get_parameter('publish_debug_image').value)
+        self._locked_uv = None  # 目标连续性：上一次选中的靶心像素
 
         self.bridge = CvBridge()
         self.fx = self.fy = self.cx = self.cy = 0.0
@@ -92,7 +95,11 @@ class YoloTargetNode(Node):
     def on_cmd(self, msg):
         self._last_cmd = (int(msg.mode), math.degrees(msg.yaw), math.degrees(msg.pitch))
 
-    def _draw(self, canvas, pending, active, dist, rel_yaw, rel_pitch, has_target):
+    def _draw(self, canvas, pending, active, dist, rel_yaw, rel_pitch, has_target,
+              target_uv=None):
+        if target_uv is not None:
+            # 用绿圈标出“当前锁定的那块靶”，方便肉眼确认没在多块靶之间跳
+            cv2.circle(canvas, (int(target_uv[0]), int(target_uv[1])), 18, (0, 255, 0), 3)
         self._fps_n += 1
         now = time.monotonic()
         if now - self._fps_t >= 1.0:
@@ -126,17 +133,30 @@ class YoloTargetNode(Node):
 
         pending = 0
         active = 0
-        best = None  # (conf, u, v, w_px)
+        cands = []  # (conf, u, v, w_px)
         for box in result.boxes:
             cls = int(box.cls[0])
             conf = float(box.conf[0])
             x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
             if cls == PENDING:
                 pending += 1
-                if best is None or conf > best[0]:
-                    best = (conf, 0.5 * (x1 + x2), 0.5 * (y1 + y2), x2 - x1)
+                cands.append((conf, 0.5 * (x1 + x2), 0.5 * (y1 + y2), x2 - x1))
             elif cls == ACTIVE:
                 active += 1
+
+        # 目标连续性：多块靶同时可见时，优先沿用上一次选中的那块，避免在靶之间来回跳
+        best = None
+        if cands:
+            if self._locked_uv is not None:
+                lu, lv = self._locked_uv
+                nearest = min(cands, key=lambda c: (c[1] - lu) ** 2 + (c[2] - lv) ** 2)
+                dist = math.hypot(nearest[1] - lu, nearest[2] - lv)
+                best = nearest if dist <= self.target_gate_px else max(cands, key=lambda c: c[0])
+            else:
+                best = max(cands, key=lambda c: c[0])
+            self._locked_uv = (best[1], best[2])
+        else:
+            self._locked_uv = None  # 目标消失，下次重新选
 
         state = String()
         state.data = f'pending={pending} active={active}'
@@ -162,7 +182,8 @@ class YoloTargetNode(Node):
         rel_pitch = -math.degrees(math.atan2(v - self.cy, self.fy))
 
         if self.publish_debug:
-            self._draw(result.plot(), pending, active, distance, rel_yaw, rel_pitch, True)
+            self._draw(result.plot(), pending, active, distance, rel_yaw, rel_pitch, True,
+                       target_uv=(u, v))
 
         out = PoseStamped()
         out.header = msg.header
