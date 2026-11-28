@@ -59,6 +59,9 @@ public:
     declare_parameter("ab_alpha", 0.45);         // alpha-beta 滤波：位置增益
     declare_parameter("ab_beta", 0.08);          // alpha-beta 滤波：速度增益
     declare_parameter("jump_reset_deg", 15.0);   // 目标跳变超过该角度就复位（换靶）
+    declare_parameter("lock_deg", 0.5);          // 误差小于该值并持续 lock_frames 帧 -> 锁定冻结
+    declare_parameter("unlock_deg", 2.0);        // 误差超过该值 -> 解锁（迟滞，防边界抖）
+    declare_parameter("lock_frames", 5);         // 连续多少帧满足才锁定
     declare_parameter("deadband_deg", 0.2);      // 死区：指令变化小于该值就不动
     declare_parameter("yaw_sign", 1.0);          // 云台 yaw 方向：转向反了就设 -1
     declare_parameter("pitch_sign", 1.0);        // 云台 pitch 方向：反了就设 -1
@@ -81,6 +84,9 @@ public:
     ab_alpha_ = get_parameter("ab_alpha").as_double();
     ab_beta_ = get_parameter("ab_beta").as_double();
     jump_reset_rad_ = get_parameter("jump_reset_deg").as_double() * kDeg2Rad;
+    lock_rad_ = get_parameter("lock_deg").as_double() * kDeg2Rad;
+    unlock_rad_ = get_parameter("unlock_deg").as_double() * kDeg2Rad;
+    lock_frames_ = get_parameter("lock_frames").as_int();
     yaw_sign_ = get_parameter("yaw_sign").as_double();
     pitch_sign_ = get_parameter("pitch_sign").as_double();
 
@@ -210,13 +216,28 @@ private:
     double d_pitch = smoothed_pitch_ - last_cmd_pitch_;
     d_yaw = std::clamp(d_yaw, -max_step, max_step);
     d_pitch = std::clamp(d_pitch, -max_step, max_step);
+    // 静止靶锁定：连续几帧误差都很小就冻结指令，让云台真正停住（不再逐帧微调）；
+    // 误差超过 unlock_deg 才解锁（迟滞，避免在阈值边界反复进出）
+    if (locked_) {
+      if (std::fabs(rel_yaw) > unlock_rad_ || std::fabs(rel_pitch) > unlock_rad_) {
+        locked_ = false;
+        lock_count_ = 0;
+      }
+    } else if (std::fabs(rel_yaw) < lock_rad_ && std::fabs(rel_pitch) < lock_rad_) {
+      if (++lock_count_ >= lock_frames_) locked_ = true;
+    } else {
+      lock_count_ = 0;
+    }
+
     const double yaw_cmd0 = last_cmd_yaw_ + d_yaw;
     const double pitch_cmd0 = last_cmd_pitch_ + d_pitch;
-    // 死区：指令变化太小时保持不动，避免在靶心附近反复微调
+    // 死区 + 锁定：指令不变化就保持上一次输出，云台静止
     double yaw_cmd = yaw_cmd0;
     double pitch_cmd = pitch_cmd0;
-    if (std::fabs(wrapAngle(yaw_cmd0 - last_cmd_yaw_)) >= deadband_rad_ ||
-        std::fabs(pitch_cmd0 - last_cmd_pitch_) >= deadband_rad_) {
+    const bool frozen = locked_ ||
+        (std::fabs(wrapAngle(yaw_cmd0 - last_cmd_yaw_)) < deadband_rad_ &&
+         std::fabs(pitch_cmd0 - last_cmd_pitch_) < deadband_rad_);
+    if (!frozen) {
       last_cmd_yaw_ = yaw_cmd0;
       last_cmd_pitch_ = pitch_cmd0;
     } else {
@@ -285,6 +306,8 @@ private:
     cmd.pitch_acc = 0.0;
     has_cmd_ = false;          // 目标丢失后重置平滑/限速状态，重新捕获时从当前姿态起步
     ab_init_ = false;          // 滤波也复位，避免用旧的预测值
+    locked_ = false;           // 解锁，重新捕获后重新判锁定
+    lock_count_ = 0;
     last_cmd_yaw_ = yaw_;
     last_cmd_pitch_ = pitch_;
     cmd_pub_->publish(cmd);
@@ -315,6 +338,11 @@ private:
   double ab_yaw_rate_{0.0};
   double ab_pitch_rate_{0.0};
   rclcpp::Time ab_stamp_;
+  double lock_rad_{0.5 * kDeg2Rad};
+  double unlock_rad_{2.0 * kDeg2Rad};
+  int lock_frames_{5};
+  bool locked_{false};
+  int lock_count_{0};
   double yaw_sign_{1.0};
   double pitch_sign_{1.0};
   bool has_input_{false};

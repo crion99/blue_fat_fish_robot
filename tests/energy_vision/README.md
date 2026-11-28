@@ -115,6 +115,8 @@ ros2 run energy_vision pose_aim_node
 | `smooth_alpha` | 0.3 | （已由 alpha-beta 取代，保留兼容） |
 | `ab_alpha` / `ab_beta` | 0.45 / 0.08 | alpha-beta 滤波的位置/速度增益：越小越平滑，越大越跟手 |
 | `jump_reset_deg` | 15 | 目标跳变超过该角度（换靶 72°）时滤波直接复位，不拖影 |
+| `lock_deg` / `unlock_deg` | 0.5 / 2.0 | 静止靶锁定：误差连续小于 lock_deg 就冻结指令（云台停住），超过 unlock_deg 才解锁 |
+| `lock_frames` | 5 | 连续多少帧满足锁定条件才真正锁定 |
 | `max_cmd_rate_radps` | 1.5 | 指令限速（rad/s），过大容易把目标甩出视野 |
 | `input_alpha` | 0.35 | 输入位置低通（抑制检测框抖动，防相机乱晃） |
 | `lead_gain` | 0.0 | 旋转靶提前量增益（0=关闭；用云台角速度当目标角速度会正反馈过冲） |
