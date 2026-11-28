@@ -55,7 +55,7 @@ public:
     declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
     declare_parameter("max_cmd_rate_radps", 1.0);  // 单帧限速：1.0 rad/s ≈ 57°/s（兼顾 fixed 与旋转靶）
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
-    declare_parameter("lead_gain", 0.0);         // 提前量增益：0=关闭（默认，避免转过头）
+    declare_parameter("lead_gain", 1.0);         // 提前量增益：用“目标角速度”估计，静止靶自动为 0
     declare_parameter("ab_alpha", 0.45);         // alpha-beta 滤波：位置增益
     declare_parameter("ab_beta", 0.08);          // alpha-beta 滤波：速度增益
     declare_parameter("jump_reset_deg", 15.0);   // 目标跳变超过该角度就复位（换靶）
@@ -169,12 +169,8 @@ private:
     // 实测标定的固定仰角偏置（球速/安装误差的一揽子补偿，默认 0）
     raw_pitch += pitch_offset_deg_ * M_PI / 180.0;
 
-    // 旋转靶提前量（默认关闭：yaw_rate_ 是“云台自己”的角速度，
-    // 直接拿它做提前量会变成正反馈，云台越快越往前冲，表现就是“转过头”反复摆）
-    const double flight = distance / bullet_speed_;
-    if (lead_gain_ > 0.0) {
-      raw_yaw += lead_gain_ * yaw_rate_ * (latency_s_ + flight);
-    }
+    // 注意：提前量不在这里加——必须用“目标的”角速度，而它由下面的 alpha-beta 滤波器估计。
+    // 早期版本在这里用 yaw_rate_（云台自己的角速度）做提前量，变成正反馈，云台越转越冲过头。
 
     // alpha-beta 滤波（比 EMA 多一个速度状态：更顺、滞后更小；换靶时自动复位）
     const rclcpp::Time now_pose = get_clock()->now();
@@ -206,8 +202,16 @@ private:
         ab_pitch_rate_ += ab_beta_ * res_p / dt;
       }
     }
-    smoothed_yaw_ = ab_yaw_;
-    smoothed_pitch_ = ab_pitch_;
+    // 提前量：用 alpha-beta 估出来的“目标角速度”（不是云台角速度），
+    // 打旋转靶时按 目标角速度×(延迟+飞行时间) 往前瞄；静止靶时该角速度≈0，自动不起作用。
+    const double flight = distance / bullet_speed_;
+    const double lead_time = latency_s_ + flight;
+    const double lead_limit = 10.0 * kDeg2Rad;  // 提前量限幅，防异常估计值
+    auto clamp_lead = [lead_limit](double v) {
+      return std::clamp(v, -lead_limit, lead_limit);
+    };
+    smoothed_yaw_ = wrapAngle(ab_yaw_ + clamp_lead(lead_gain_ * ab_yaw_rate_ * lead_time));
+    smoothed_pitch_ = ab_pitch_ + clamp_lead(lead_gain_ * ab_pitch_rate_ * lead_time);
 
     // 限速：单帧允许的最大角度变化，防止一帧猛摆几十度把目标甩出视野
     const double dt = 1.0 / 60.0;
@@ -329,7 +333,7 @@ private:
   double max_cmd_rate_radps_{1.0};
   double input_alpha_{0.35};
   double deadband_rad_{0.2 * kDeg2Rad};
-  double lead_gain_{0.0};
+  double lead_gain_{1.0};
   double ab_alpha_{0.45};
   double ab_beta_{0.08};
   double jump_reset_rad_{15.0 * kDeg2Rad};
