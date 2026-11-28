@@ -53,7 +53,7 @@ public:
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
     declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
-    declare_parameter("max_cmd_rate_radps", 0.6);  // 单帧限速：0.6 rad/s ≈ 34°/s，修正幅度小
+    declare_parameter("max_cmd_rate_radps", 1.0);  // 单帧限速：1.0 rad/s ≈ 57°/s（兼顾 fixed 与旋转靶）
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
     declare_parameter("lead_gain", 0.0);         // 提前量增益：0=关闭（默认，避免转过头）
     declare_parameter("ab_alpha", 0.45);         // alpha-beta 滤波：位置增益
@@ -326,7 +326,7 @@ private:
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};
   double smooth_alpha_{0.3};
-  double max_cmd_rate_radps_{0.6};
+  double max_cmd_rate_radps_{1.0};
   double input_alpha_{0.35};
   double deadband_rad_{0.2 * kDeg2Rad};
   double lead_gain_{0.0};
