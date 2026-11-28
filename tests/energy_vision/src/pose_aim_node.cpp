@@ -53,7 +53,7 @@ public:
     declare_parameter("stale_timeout_s", 0.40);  // 超过该时长无目标则发 mode=0
     declare_parameter("dead_reckon_s", 0.50);    // 丢失后按角速度航位推算的持续时长
     declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
-    declare_parameter("max_cmd_rate_radps", 1.5);  // 单帧限速，防止猛摆冲出视野
+    declare_parameter("max_cmd_rate_radps", 0.6);  // 单帧限速：0.6 rad/s ≈ 34°/s，修正幅度小
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
     declare_parameter("lead_gain", 0.0);         // 提前量增益：0=关闭（默认，避免转过头）
     declare_parameter("ab_alpha", 0.45);         // alpha-beta 滤波：位置增益
@@ -61,7 +61,7 @@ public:
     declare_parameter("jump_reset_deg", 15.0);   // 目标跳变超过该角度就复位（换靶）
     declare_parameter("lock_deg", 0.5);          // 误差小于该值并持续 lock_frames 帧 -> 锁定冻结
     declare_parameter("unlock_deg", 2.0);        // 误差超过该值 -> 解锁（迟滞，防边界抖）
-    declare_parameter("lock_frames", 5);         // 连续多少帧满足才锁定
+    declare_parameter("lock_frames", 0);         // 0=不锁定（默认）；>0 才启用静止靶冻结
     declare_parameter("deadband_deg", 0.2);      // 死区：指令变化小于该值就不动
     declare_parameter("yaw_sign", 1.0);          // 云台 yaw 方向：转向反了就设 -1
     declare_parameter("pitch_sign", 1.0);        // 云台 pitch 方向：反了就设 -1
@@ -223,7 +223,8 @@ private:
         locked_ = false;
         lock_count_ = 0;
       }
-    } else if (std::fabs(rel_yaw) < lock_rad_ && std::fabs(rel_pitch) < lock_rad_) {
+    } else if (lock_frames_ > 0 && std::fabs(rel_yaw) < lock_rad_ &&
+               std::fabs(rel_pitch) < lock_rad_) {
       if (++lock_count_ >= lock_frames_) locked_ = true;
     } else {
       lock_count_ = 0;
@@ -325,7 +326,7 @@ private:
   double stale_timeout_s_{0.40};
   double dead_reckon_s_{0.50};
   double smooth_alpha_{0.3};
-  double max_cmd_rate_radps_{1.5};
+  double max_cmd_rate_radps_{0.6};
   double input_alpha_{0.35};
   double deadband_rad_{0.2 * kDeg2Rad};
   double lead_gain_{0.0};
@@ -340,7 +341,7 @@ private:
   rclcpp::Time ab_stamp_;
   double lock_rad_{0.5 * kDeg2Rad};
   double unlock_rad_{2.0 * kDeg2Rad};
-  int lock_frames_{5};
+  int lock_frames_{0};
   bool locked_{false};
   int lock_count_{0};
   double yaw_sign_{1.0};
