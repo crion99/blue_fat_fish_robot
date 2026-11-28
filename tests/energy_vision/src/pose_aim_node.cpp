@@ -56,6 +56,9 @@ public:
     declare_parameter("max_cmd_rate_radps", 1.5);  // 单帧限速，防止猛摆冲出视野
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
     declare_parameter("lead_gain", 0.0);         // 提前量增益：0=关闭（默认，避免转过头）
+    declare_parameter("ab_alpha", 0.45);         // alpha-beta 滤波：位置增益
+    declare_parameter("ab_beta", 0.08);          // alpha-beta 滤波：速度增益
+    declare_parameter("jump_reset_deg", 15.0);   // 目标跳变超过该角度就复位（换靶）
     declare_parameter("deadband_deg", 0.2);      // 死区：指令变化小于该值就不动
     declare_parameter("yaw_sign", 1.0);          // 云台 yaw 方向：转向反了就设 -1
     declare_parameter("pitch_sign", 1.0);        // 云台 pitch 方向：反了就设 -1
@@ -75,6 +78,9 @@ public:
     input_alpha_ = get_parameter("input_alpha").as_double();
     deadband_rad_ = get_parameter("deadband_deg").as_double() * kDeg2Rad;
     lead_gain_ = get_parameter("lead_gain").as_double();
+    ab_alpha_ = get_parameter("ab_alpha").as_double();
+    ab_beta_ = get_parameter("ab_beta").as_double();
+    jump_reset_rad_ = get_parameter("jump_reset_deg").as_double() * kDeg2Rad;
     yaw_sign_ = get_parameter("yaw_sign").as_double();
     pitch_sign_ = get_parameter("pitch_sign").as_double();
 
@@ -164,15 +170,38 @@ private:
       raw_yaw += lead_gain_ * yaw_rate_ * (latency_s_ + flight);
     }
 
-    // 低通平滑：抑制像素噪声 + 反馈延迟引起的抖振/过冲
-    if (!has_cmd_) {
-      smoothed_yaw_ = raw_yaw;
-      smoothed_pitch_ = raw_pitch;
-      has_cmd_ = true;
+    // alpha-beta 滤波（比 EMA 多一个速度状态：更顺、滞后更小；换靶时自动复位）
+    const rclcpp::Time now_pose = get_clock()->now();
+    if (!ab_init_) {
+      ab_yaw_ = raw_yaw;
+      ab_pitch_ = raw_pitch;
+      ab_yaw_rate_ = 0.0;
+      ab_pitch_rate_ = 0.0;
+      ab_stamp_ = now_pose;
+      ab_init_ = true;
     } else {
-      smoothed_yaw_ += smooth_alpha_ * wrapAngle(raw_yaw - smoothed_yaw_);
-      smoothed_pitch_ += smooth_alpha_ * (raw_pitch - smoothed_pitch_);
+      double dt = (now_pose - ab_stamp_).seconds();
+      ab_stamp_ = now_pose;
+      if (dt <= 1e-4 || dt > 0.5) dt = 1.0 / 60.0;
+      const double pred_y = wrapAngle(ab_yaw_ + ab_yaw_rate_ * dt);
+      const double pred_p = ab_pitch_ + ab_pitch_rate_ * dt;
+      const double res_y = wrapAngle(raw_yaw - pred_y);
+      const double res_p = raw_pitch - pred_p;
+      if (std::fabs(res_y) > jump_reset_rad_ || std::fabs(res_p) > jump_reset_rad_) {
+        // 换靶（5 个靶相隔 72°）：直接复位，不让滤波器拖着走
+        ab_yaw_ = raw_yaw;
+        ab_pitch_ = raw_pitch;
+        ab_yaw_rate_ = 0.0;
+        ab_pitch_rate_ = 0.0;
+      } else {
+        ab_yaw_ = wrapAngle(pred_y + ab_alpha_ * res_y);
+        ab_pitch_ = pred_p + ab_alpha_ * res_p;
+        ab_yaw_rate_ += ab_beta_ * res_y / dt;
+        ab_pitch_rate_ += ab_beta_ * res_p / dt;
+      }
     }
+    smoothed_yaw_ = ab_yaw_;
+    smoothed_pitch_ = ab_pitch_;
 
     // 限速：单帧允许的最大角度变化，防止一帧猛摆几十度把目标甩出视野
     const double dt = 1.0 / 60.0;
@@ -255,6 +284,7 @@ private:
     cmd.pitch_vel = 0.0;
     cmd.pitch_acc = 0.0;
     has_cmd_ = false;          // 目标丢失后重置平滑/限速状态，重新捕获时从当前姿态起步
+    ab_init_ = false;          // 滤波也复位，避免用旧的预测值
     last_cmd_yaw_ = yaw_;
     last_cmd_pitch_ = pitch_;
     cmd_pub_->publish(cmd);
@@ -276,6 +306,15 @@ private:
   double input_alpha_{0.35};
   double deadband_rad_{0.2 * kDeg2Rad};
   double lead_gain_{0.0};
+  double ab_alpha_{0.45};
+  double ab_beta_{0.08};
+  double jump_reset_rad_{15.0 * kDeg2Rad};
+  bool ab_init_{false};
+  double ab_yaw_{0.0};
+  double ab_pitch_{0.0};
+  double ab_yaw_rate_{0.0};
+  double ab_pitch_rate_{0.0};
+  rclcpp::Time ab_stamp_;
   double yaw_sign_{1.0};
   double pitch_sign_{1.0};
   bool has_input_{false};
