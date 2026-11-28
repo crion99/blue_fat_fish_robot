@@ -1,34 +1,36 @@
 #!/usr/bin/env python3
-"""用训练好的 YOLO 检测待激活靶板，输出与 light_detector 完全相同的位姿话题，
-   下游 pose_aim_node / 瞄准链一行都不用改。
-
-默认加载包内自带的模型（models/rune_best.pt），无需手动指定。
+"""YOLO 检测待激活靶板 -> 位姿 -> 瞄准/开火，并把「四个部分的显示」做在同一张调试图上。
 
 输出：
-    /vision/pending_target_pose  geometry_msgs/PoseStamped
-        position = 靶心在相机光轴系下的坐标（x 右, y 下, z 前，单位 m）
-    /vision/rune_states          std_msgs/String           "pending=N active=M"
-    /vision/yolo_debug           sensor_msgs/Image         带框的调试图
-
-原理（单目，瞄准只需要角度 + 距离）：
-    - 框中心 (u,v) -> 方向：x = (u-cx)/fx*d, y = (v-cy)/fy*d
-    - 框宽 w_px -> 距离：d = fx * plate_width_m / w_px
-    pose_aim_node 再做 相机->枪口、重力补偿、旋转靶提前量。
+    /vision/pending_target_pose  PoseStamped  靶心在相机系的位置（m）
+    /vision/rune_states          String       "pending=N active=M"
+    /vision/yolo_debug           Image        四部分合一的可视化（rqt_image_view 看）
+                                             [P2] 帧率/分辨率
+                                             [P1] 待激活/已激活 数量 + 检测框
+                                             [P3] 距离 + 相对角 + 云台指令
+                                             [P4] mode（1=只跟 2=开火）
 
 用法：
     ros2 run energy_vision yolo_target_node            # 用包内模型
     ros2 run energy_vision yolo_target_node --ros-args -p model:=/path/to/best.pt
 """
+import math
 import os
+import time
 
+import cv2
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
-
 from ultralytics import YOLO
+
+try:
+    from robomini_interfaces.msg import VisionToGimbal
+except ImportError:  # 接口包未构建时仍可单独调试检测
+    VisionToGimbal = None
 
 PENDING = 0
 ACTIVE = 1
@@ -51,10 +53,9 @@ class YoloTargetNode(Node):
         super().__init__('yolo_target_node')
         self.declare_parameter('model', '')
         self.declare_parameter('conf', 0.30)
-        self.declare_parameter('plate_width_m', 0.195)  # 靶板真实宽度（m）
-        # 本仿真里机关位置固定，用固定距离最稳；设为 0 则用框宽估算（会抖）
-        self.declare_parameter('nominal_distance_m', 1.9)
-        self.declare_parameter('center_alpha', 0.5)     # 框中心低通
+        self.declare_parameter('plate_width_m', 0.195)
+        self.declare_parameter('nominal_distance_m', 1.9)  # 0 = 用框宽估算
+        self.declare_parameter('center_alpha', 0.5)
         self.declare_parameter('publish_debug_image', True)
 
         model_path = self.get_parameter('model').value or _default_model_path()
@@ -66,21 +67,56 @@ class YoloTargetNode(Node):
         self.nominal_d = float(self.get_parameter('nominal_distance_m').value)
         self.center_alpha = float(self.get_parameter('center_alpha').value)
         self.publish_debug = bool(self.get_parameter('publish_debug_image').value)
-        self._uv = None  # 框中心低通状态
 
         self.bridge = CvBridge()
         self.fx = self.fy = self.cx = self.cy = 0.0
+        self._uv = None
+        self._fps_t = time.monotonic()
+        self._fps_n = 0
+        self._fps = 0.0
+        self._last_cmd = None  # (mode, yaw_deg, pitch_deg)
 
         self.create_subscription(CameraInfo, '/camera/camera_info', self.on_info, 10)
         self.create_subscription(Image, '/camera/image_raw', self.on_img, 10)
+        if VisionToGimbal is not None:
+            self.create_subscription(VisionToGimbal, '/vision_to_gimbal', self.on_cmd, 10)
         self.pose_pub = self.create_publisher(PoseStamped, '/vision/pending_target_pose', 10)
         self.state_pub = self.create_publisher(String, '/vision/rune_states', 10)
         self.debug_pub = self.create_publisher(Image, '/vision/yolo_debug', 10)
-        self.get_logger().info(f'yolo_target_node 启动，模型: {model_path}')
+        self.get_logger().info(f'yolo_target_node 启动，模型: {model_path}，标称距离 {self.nominal_d} m')
 
     def on_info(self, msg):
         self.fx, self.fy = msg.k[0], msg.k[4]
         self.cx, self.cy = msg.k[2], msg.k[5]
+
+    def on_cmd(self, msg):
+        self._last_cmd = (int(msg.mode), math.degrees(msg.yaw), math.degrees(msg.pitch))
+
+    def _draw(self, canvas, pending, active, dist, rel_yaw, rel_pitch, has_target):
+        self._fps_n += 1
+        now = time.monotonic()
+        if now - self._fps_t >= 1.0:
+            self._fps = self._fps_n / (now - self._fps_t)
+            self._fps_n = 0
+            self._fps_t = now
+
+        lines = [
+            f'[P2] {self._fps:4.1f} fps  {canvas.shape[1]}x{canvas.shape[0]}',
+            f'[P1] pending={pending} active={active}',
+        ]
+        if has_target:
+            lines.append(f'[P3] d={dist:.2f}m rel=({rel_yaw:+.1f}, {rel_pitch:+.1f}) deg')
+        else:
+            lines.append('[P3] no pending target')
+        if self._last_cmd is not None:
+            m, yw, pt = self._last_cmd
+            tag = 'FIRE' if m == 2 else ('TRACK' if m == 1 else 'IDLE')
+            lines.append(f'[P3/P4] cmd yaw={yw:+.1f} pitch={pt:+.1f}  mode={m}({tag})')
+
+        for i, text in enumerate(lines):
+            cv2.putText(canvas, text, (14, 32 + 28 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.75,
+                        (0, 255, 255), 2)
+        self.debug_pub.publish(self.bridge.cv2_to_imgmsg(canvas, 'bgr8'))
 
     def on_img(self, msg):
         if self.fx <= 0.0:
@@ -106,14 +142,12 @@ class YoloTargetNode(Node):
         state.data = f'pending={pending} active={active}'
         self.state_pub.publish(state)
 
-        if self.publish_debug:
-            self.debug_pub.publish(self.bridge.cv2_to_imgmsg(result.plot(), 'bgr8'))
-
         if best is None:
-            return  # 没有待激活靶 -> 不发位姿，下游自动停控
+            if self.publish_debug:
+                self._draw(result.plot(), pending, active, 0.0, 0.0, 0.0, False)
+            return
 
         _, u, v, w_px = best
-        # 框中心低通，抑制逐帧抖动
         if self._uv is None:
             self._uv = (u, v)
         else:
@@ -122,11 +156,13 @@ class YoloTargetNode(Node):
                         self._uv[1] + a * (v - self._uv[1]))
         u, v = self._uv
 
-        # 距离：优先用固定标称距离（本仿真机关位置固定），否则用框宽估算
-        if self.nominal_d > 0.0:
-            distance = self.nominal_d
-        else:
-            distance = self.fx * self.plate_w / max(w_px, 1.0)
+        distance = (self.nominal_d if self.nominal_d > 0.0
+                    else self.fx * self.plate_w / max(w_px, 1.0))
+        rel_yaw = -math.degrees(math.atan2(u - self.cx, self.fx))
+        rel_pitch = -math.degrees(math.atan2(v - self.cy, self.fy))
+
+        if self.publish_debug:
+            self._draw(result.plot(), pending, active, distance, rel_yaw, rel_pitch, True)
 
         out = PoseStamped()
         out.header = msg.header

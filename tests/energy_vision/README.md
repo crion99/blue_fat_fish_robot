@@ -26,6 +26,34 @@
 （`geometry_msgs/PoseStamped`，`position.x/y/z` 即靶心在相机光轴系的 右/下/前 坐标，米），
 内部完成 相机系→云台系 变换、枪口偏移修正、重力补偿、旋转靶提前量，再按仿真接口发 `/vision_to_gimbal`。
 
+## 考核四部分的“显示”在哪
+
+跑 `ros2 launch energy_vision energy_vision.launch.py` 后，**一个窗口就能看到四部分的证据**：
+
+```bash
+ros2 run rqt_image_view rqt_image_view /vision/yolo_debug
+```
+
+窗口里会叠加四行：
+
+| 标记 | 对应部分 | 内容 |
+| --- | --- | --- |
+| `[P2]` | 第 2 部分 相机 | 实时帧率 + 分辨率 |
+| `[P1]` | 第 1 部分 识别 | `pending=N active=M` + 检测框（YOLO 画的） |
+| `[P3]` | 第 3 部分 位姿/转角 | 距离 `d`、目标相对角 `rel(yaw,pitch)` |
+| `[P3/P4]` | 第 3/4 部分 指令 | 云台指令 `yaw/pitch` + `mode`（1=TRACK 2=FIRE） |
+
+如果还想单独看原始相机画面（第 2 部分原样输出）：
+
+```bash
+ros2 launch energy_vision energy_vision.launch.py show_camera:=true
+# 或
+ros2 run rqt_image_view rqt_image_view /camera/image_raw
+```
+
+用 HSV 方案（`use_hsv:=true`）时，`light_detector` 自己的窗口会画 `Pending/Active`、`Pose valid`、
+`Reprojection RMSE`、`Target Center`，那是第 1、3 部分的另一套显示。
+
 ## 一键启动（推荐）
 
 ```bash
