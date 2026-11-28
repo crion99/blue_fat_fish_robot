@@ -115,6 +115,7 @@ ros2 run energy_vision pose_aim_node
 | `smooth_alpha` | 0.3 | 指令低通系数（0~1），越小越“钝”、越不易过冲 |
 | `max_cmd_rate_radps` | 1.5 | 指令限速（rad/s），过大容易把目标甩出视野 |
 | `input_alpha` | 0.35 | 输入位置低通（抑制检测框抖动，防相机乱晃） |
+| `lead_gain` | 0.0 | 旋转靶提前量增益（0=关闭；用云台角速度当目标角速度会正反馈过冲） |
 | `deadband_deg` | 0.2 | 死区：指令变化小于该值就不动，抑制靶心附近反复微调 |
 | `yaw_sign` / `pitch_sign` | 1 / 1 | 云台方向符号；**“越追越远”就设 -1** |
 | `nominal_distance_m` | 1.9 | YOLO 节点用固定距离代替框宽估算（0=用框宽，会抖） |

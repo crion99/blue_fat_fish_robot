@@ -55,6 +55,7 @@ public:
     declare_parameter("smooth_alpha", 0.3);      // 指令低通系数，越小越“钝”越不易过冲
     declare_parameter("max_cmd_rate_radps", 1.5);  // 单帧限速，防止猛摆冲出视野
     declare_parameter("input_alpha", 0.35);      // 输入位置低通（抑制检测框抖动）
+    declare_parameter("lead_gain", 0.0);         // 提前量增益：0=关闭（默认，避免转过头）
     declare_parameter("deadband_deg", 0.2);      // 死区：指令变化小于该值就不动
     declare_parameter("yaw_sign", 1.0);          // 云台 yaw 方向：转向反了就设 -1
     declare_parameter("pitch_sign", 1.0);        // 云台 pitch 方向：反了就设 -1
@@ -73,6 +74,7 @@ public:
     max_cmd_rate_radps_ = get_parameter("max_cmd_rate_radps").as_double();
     input_alpha_ = get_parameter("input_alpha").as_double();
     deadband_rad_ = get_parameter("deadband_deg").as_double() * kDeg2Rad;
+    lead_gain_ = get_parameter("lead_gain").as_double();
     yaw_sign_ = get_parameter("yaw_sign").as_double();
     pitch_sign_ = get_parameter("pitch_sign").as_double();
 
@@ -155,9 +157,12 @@ private:
     // 实测标定的固定仰角偏置（球速/安装误差的一揽子补偿，默认 0）
     raw_pitch += pitch_offset_deg_ * M_PI / 180.0;
 
-    // 旋转靶提前量（先加在原始目标上，再一起平滑）
+    // 旋转靶提前量（默认关闭：yaw_rate_ 是“云台自己”的角速度，
+    // 直接拿它做提前量会变成正反馈，云台越快越往前冲，表现就是“转过头”反复摆）
     const double flight = distance / bullet_speed_;
-    raw_yaw += yaw_rate_ * (latency_s_ + flight);
+    if (lead_gain_ > 0.0) {
+      raw_yaw += lead_gain_ * yaw_rate_ * (latency_s_ + flight);
+    }
 
     // 低通平滑：抑制像素噪声 + 反馈延迟引起的抖振/过冲
     if (!has_cmd_) {
@@ -270,6 +275,7 @@ private:
   double max_cmd_rate_radps_{1.5};
   double input_alpha_{0.35};
   double deadband_rad_{0.2 * kDeg2Rad};
+  double lead_gain_{0.0};
   double yaw_sign_{1.0};
   double pitch_sign_{1.0};
   bool has_input_{false};
